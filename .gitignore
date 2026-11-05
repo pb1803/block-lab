@@ -6,6 +6,7 @@ node_modules/
 dist/
 build/
 out/
+*.tsbuildinfo
 .next/
 .nuxt/
 .svelte-kit/
@@ -22,7 +23,7 @@ out/
 # Local experiment data, evidence and traces
 .blocklab/
 experiments/
-evidence/
+/evidence/
 traces/
 *.trace
 *.evidence

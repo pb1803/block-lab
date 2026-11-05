@@ -1,0 +1,18 @@
+{
+  "name": "@blocklab/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "blocklab": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@blocklab/core": "workspace:*",
+    "@blocklab/evidence": "workspace:*",
+    "@blocklab/inspector": "workspace:*",
+    "@blocklab/runner": "workspace:*",
+    "@blocklab/scenarios": "workspace:*"
+  }
+}
