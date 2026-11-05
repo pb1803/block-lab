@@ -19,13 +19,17 @@ Open the URL printed by Vite. Set `VITE_RPC_URL` in
 ignored by Git. Do not put credentials in the endpoint or commit local
 configuration.
 
-The intended future flow is:
+The local experiment flow is:
 
 ```text
-sample dApp -> configurable RPC endpoint -> future BLOCKLAB local proxy -> Anvil
+sample dApp -> configurable RPC endpoint -> BLOCKLAB local proxy -> Anvil
 ```
 
-The proxy and fault injection are not implemented in this phase.
+Start the proxy as part of a runner experiment and point the sample at the
+reported local proxy URL. The proxy has no hosted mode and only accepts a
+loopback upstream. Its blackout window is deterministic and closes during
+runner cleanup. Full CLI orchestration and application-level evaluation remain
+later phases.
 
 ## Start Anvil
 
@@ -83,5 +87,7 @@ does not display the configured endpoint.
 - The sample has no wallet or transaction flow.
 - It currently performs one chain-ID read and one block-number read.
 - It does not claim resilience or failover.
-- The BLOCKLAB proxy, blackout scenario, and process lifecycle manager are
-  planned for later phases.
+- The proxy currently rejects JSON-RPC batches and transaction/signing methods.
+- The runner does not forcibly terminate an uncooperative asynchronous task.
+- Full `blocklab test rpc-blackout` orchestration and evaluator are planned for
+  later phases.

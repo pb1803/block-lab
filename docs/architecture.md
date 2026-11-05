@@ -84,7 +84,22 @@ configuration, and enforces loopback-only targets. An authorization interface is
 defined for future staging support, but authorized staging execution remains
 disabled rather than simulated.
 
-This phase does not create an RPC proxy, intercept requests, inject failures,
-launch imported project scripts, or manage Anvil/Docker. Cancellation signals
-cooperative tasks; an arbitrary uncooperative asynchronous task cannot be
-forcibly terminated by this library.
+## Local RPC proxy boundary
+
+The runner now provides a Node.js-only `RpcProxy` for local experiments. It
+binds to `127.0.0.1`, accepts one explicit HTTP(S) upstream that must also be
+loopback, rejects batches and transaction/signing methods, limits request
+bodies, and applies an upstream timeout. It records only redacted metadata
+(method, request ID, timestamps, latency, origin, and outcome category); raw
+request bodies, query strings, credentials, and RPC parameters are not stored.
+
+The `rpc-blackout` schedule uses the interval
+`[startOffsetMs, startOffsetMs + durationMs)`: the start boundary is blocked
+and the end boundary forwards again. Blackout responses preserve the JSON-RPC
+request ID and do not contact the upstream. `runRpcBlackout` starts the proxy
+inside an existing execution and registers its close operation with the
+execution cleanup stack, including timeout and cancellation paths.
+
+This phase does not launch imported project scripts, manage Anvil/Docker, or
+provide a hosted proxy. Cancellation signals cooperative tasks; an arbitrary
+uncooperative asynchronous task cannot be forcibly terminated by this library.

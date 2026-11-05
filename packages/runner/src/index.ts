@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { Experiment, ScenarioDefinition } from "@blocklab/core";
 
 export type RunnerPhase =
@@ -80,6 +86,78 @@ export interface ExecutionResult<T> {
   readonly cleanupFailures: readonly CleanupFailure[];
   readonly events: readonly LifecycleEvent[];
 }
+
+export type ProxyOutcome =
+  | "forwarded_success"
+  | "forwarded_error"
+  | "upstream_timeout"
+  | "upstream_unavailable"
+  | "injected_blackout"
+  | "invalid_request"
+  | "proxy_error";
+
+export type ProxyErrorCategory =
+  | "invalid_json"
+  | "invalid_json_rpc"
+  | "unsupported_method"
+  | "body_too_large"
+  | "upstream_http"
+  | "upstream_timeout"
+  | "upstream_connection"
+  | "injected_blackout"
+  | "proxy";
+
+export interface RpcProxyEvidence {
+  readonly executionId: string;
+  readonly scenarioId: string;
+  readonly timestamp: string;
+  readonly method: string;
+  readonly requestId?: string | number | null;
+  readonly correlationId: string;
+  readonly outcome: ProxyOutcome;
+  readonly injected: boolean;
+  readonly latencyMs: number;
+  readonly upstreamOrigin: string;
+  readonly errorCategory?: ProxyErrorCategory;
+}
+
+export interface BlackoutConfig {
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface RpcProxyConfig {
+  readonly upstreamUrl: string;
+  readonly port?: number;
+  readonly host?: "127.0.0.1";
+  readonly requestBodyLimitBytes?: number;
+  readonly upstreamTimeoutMs?: number;
+  readonly blackout?: BlackoutConfig;
+  readonly now?: () => number;
+  readonly executionId?: string;
+  readonly scenarioId?: string;
+}
+
+export interface RpcProxyAddress {
+  readonly host: "127.0.0.1";
+  readonly port: number;
+  readonly url: string;
+}
+
+export interface RpcBlackoutExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
+export type RpcBlackoutWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 5_000;
+const DISALLOWED_METHOD = /^(eth_send|personal_|wallet_|admin_|debug_)/i;
 
 export interface Runner {
   run(
@@ -242,6 +320,486 @@ export function preflightExecution(config: ExecutionConfig): void {
       "Authorized staging execution is not enabled in this phase.",
     );
   }
+}
+
+function assertBlackoutConfig(config: BlackoutConfig): void {
+  if (
+    !Number.isInteger(config.startOffsetMs) ||
+    config.startOffsetMs < 0 ||
+    !Number.isInteger(config.durationMs) ||
+    config.durationMs <= 0
+  ) {
+    throw new PreflightError(
+      "Blackout start offset must be non-negative and duration must be a positive integer.",
+    );
+  }
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0 ||
+      config.startOffsetMs + config.durationMs > config.experimentDurationMs)
+  ) {
+    throw new PreflightError(
+      "Blackout must fit within the positive experiment duration.",
+    );
+  }
+}
+
+function upstreamOrigin(upstreamUrl: string): string {
+  try {
+    const url = new URL(upstreamUrl);
+    if (url.username || url.password) {
+      throw new PreflightError(
+        "Upstream URLs with embedded credentials are not allowed.",
+      );
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new PreflightError("Upstream URL must use HTTP or HTTPS.");
+    }
+    return url.origin;
+  } catch (error) {
+    if (error instanceof PreflightError) throw error;
+    throw new PreflightError("Upstream URL must be a valid HTTP(S) URL.");
+  }
+}
+
+export function preflightRpcProxy(config: RpcProxyConfig): void {
+  let upstream: URL;
+  try {
+    upstream = new URL(config.upstreamUrl);
+  } catch {
+    throw new PreflightError("Upstream URL must be a valid HTTP(S) URL.");
+  }
+  assertLoopbackTarget(upstream);
+  upstreamOrigin(config.upstreamUrl);
+  if (config.host !== undefined && config.host !== "127.0.0.1") {
+    throw new PreflightError("RPC proxy host must be 127.0.0.1.");
+  }
+  if (
+    config.port !== undefined &&
+    (!Number.isInteger(config.port) || config.port < 0 || config.port > 65_535)
+  ) {
+    throw new PreflightError(
+      "RPC proxy port must be an integer from 0 to 65535.",
+    );
+  }
+  if (
+    config.requestBodyLimitBytes !== undefined &&
+    (!Number.isInteger(config.requestBodyLimitBytes) ||
+      config.requestBodyLimitBytes < 1)
+  ) {
+    throw new PreflightError(
+      "RPC proxy body limit must be a positive integer.",
+    );
+  }
+  if (
+    config.upstreamTimeoutMs !== undefined &&
+    (!Number.isInteger(config.upstreamTimeoutMs) ||
+      config.upstreamTimeoutMs < 1)
+  ) {
+    throw new PreflightError(
+      "RPC proxy upstream timeout must be a positive integer.",
+    );
+  }
+  if (config.blackout !== undefined) assertBlackoutConfig(config.blackout);
+}
+
+function safeRequestId(value: unknown): string | number | null | undefined {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    (typeof value === "number" && Number.isSafeInteger(value))
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function writeJson(
+  response: ServerResponse,
+  statusCode: number,
+  payload: Readonly<Record<string, unknown>>,
+): void {
+  const body = JSON.stringify(payload);
+  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.end(body);
+}
+
+function rpcError(
+  id: string | number | null,
+  code: number,
+  message: string,
+): Readonly<Record<string, unknown>> {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+async function readRequestBody(
+  request: IncomingMessage,
+  limit: number,
+): Promise<string | undefined> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > limit) return undefined;
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function isJsonRpcRequest(value: unknown): value is {
+  readonly jsonrpc: "2.0";
+  readonly id?: unknown;
+  readonly method: string;
+} {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
+    typeof (value as { method?: unknown }).method === "string"
+  );
+}
+
+export class RpcProxy {
+  private readonly config: Required<
+    Pick<RpcProxyConfig, "requestBodyLimitBytes" | "upstreamTimeoutMs">
+  > &
+    RpcProxyConfig;
+  private readonly server: Server;
+  private readonly startedAt: number;
+  private readonly evidenceRecords: RpcProxyEvidence[] = [];
+  private readonly activeRequests = new Set<AbortController>();
+  private closePromise?: Promise<void>;
+  private address?: RpcProxyAddress;
+
+  public constructor(config: RpcProxyConfig) {
+    preflightRpcProxy(config);
+    this.config = {
+      ...config,
+      requestBodyLimitBytes:
+        config.requestBodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES,
+      upstreamTimeoutMs:
+        config.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS,
+    };
+    this.startedAt = (config.now ?? Date.now)();
+    this.server = createServer((request, response) => {
+      void this.handleRequest(request, response);
+    });
+  }
+
+  public get evidence(): readonly RpcProxyEvidence[] {
+    return [...this.evidenceRecords];
+  }
+
+  public get listeningAddress(): RpcProxyAddress | undefined {
+    return this.address;
+  }
+
+  public async start(): Promise<RpcProxyAddress> {
+    if (this.address !== undefined) return this.address;
+    const host = this.config.host ?? "127.0.0.1";
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error): void => {
+        this.server.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = (): void => {
+        this.server.off("error", onError);
+        resolve();
+      };
+      this.server.once("error", onError);
+      this.server.once("listening", onListening);
+      this.server.listen(this.config.port ?? 0, host);
+    });
+    const address = this.server.address();
+    if (address === null || typeof address === "string") {
+      throw new RunnerError("RPC proxy did not expose a TCP address.");
+    }
+    this.address = {
+      host,
+      port: address.port,
+      url: `http://${host}:${address.port}`,
+    };
+    return this.address;
+  }
+
+  public async close(): Promise<void> {
+    if (this.closePromise !== undefined) return this.closePromise;
+    this.closePromise = new Promise<void>((resolve, reject) => {
+      for (const controller of this.activeRequests) controller.abort();
+      if (!this.server.listening) {
+        resolve();
+        return;
+      }
+      this.server.close((error) => (error ? reject(error) : resolve()));
+    });
+    return this.closePromise;
+  }
+
+  private currentTime(): number {
+    return (this.config.now ?? Date.now)();
+  }
+
+  private blackoutActive(): boolean {
+    const blackout = this.config.blackout;
+    if (blackout === undefined) return false;
+    const elapsed = this.currentTime() - this.startedAt;
+    return (
+      elapsed >= blackout.startOffsetMs &&
+      elapsed < blackout.startOffsetMs + blackout.durationMs
+    );
+  }
+
+  private record(
+    request: {
+      method: string;
+      id?: string | number | null;
+      correlationId: string;
+    },
+    outcome: ProxyOutcome,
+    started: number,
+    injected: boolean,
+    errorCategory?: ProxyErrorCategory,
+  ): void {
+    const record: RpcProxyEvidence = {
+      executionId: this.config.executionId ?? "unattached",
+      scenarioId: this.config.scenarioId ?? "rpc-blackout",
+      timestamp: new Date(this.currentTime()).toISOString(),
+      method: request.method,
+      correlationId: request.correlationId,
+      outcome,
+      injected,
+      latencyMs: Math.max(0, this.currentTime() - started),
+      upstreamOrigin: upstreamOrigin(this.config.upstreamUrl),
+      ...(request.id === undefined ? {} : { requestId: request.id }),
+      ...(errorCategory === undefined ? {} : { errorCategory }),
+    };
+    this.evidenceRecords.push(record);
+  }
+
+  private async handleRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const started = this.currentTime();
+    const correlationId = randomUUID();
+    if (request.method !== "POST") {
+      this.record(
+        { method: request.method ?? "unknown", correlationId },
+        "invalid_request",
+        started,
+        false,
+        "invalid_json_rpc",
+      );
+      writeJson(
+        response,
+        405,
+        rpcError(null, -32600, "Only POST is supported."),
+      );
+      return;
+    }
+    const body = await readRequestBody(
+      request,
+      this.config.requestBodyLimitBytes,
+    );
+    if (body === undefined) {
+      this.record(
+        { method: "unknown", correlationId },
+        "invalid_request",
+        started,
+        false,
+        "body_too_large",
+      );
+      writeJson(
+        response,
+        413,
+        rpcError(null, -32600, "Request body is too large."),
+      );
+      return;
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      this.record(
+        { method: "unknown", correlationId },
+        "invalid_request",
+        started,
+        false,
+        "invalid_json",
+      );
+      writeJson(response, 400, rpcError(null, -32700, "Invalid JSON."));
+      return;
+    }
+    if (Array.isArray(payload)) {
+      this.record(
+        { method: "batch", correlationId },
+        "invalid_request",
+        started,
+        false,
+        "invalid_json_rpc",
+      );
+      writeJson(
+        response,
+        400,
+        rpcError(null, -32600, "Batch JSON-RPC requests are not supported."),
+      );
+      return;
+    }
+    if (!isJsonRpcRequest(payload)) {
+      this.record(
+        { method: "unknown", correlationId },
+        "invalid_request",
+        started,
+        false,
+        "invalid_json_rpc",
+      );
+      writeJson(
+        response,
+        400,
+        rpcError(null, -32600, "Invalid JSON-RPC request."),
+      );
+      return;
+    }
+    const id = safeRequestId(payload.id);
+    const requestInfo = {
+      method: payload.method,
+      ...(id === undefined ? {} : { id }),
+      correlationId,
+    };
+    if (Object.hasOwn(payload, "id") && id === undefined) {
+      this.record(
+        requestInfo,
+        "invalid_request",
+        started,
+        false,
+        "invalid_json_rpc",
+      );
+      writeJson(
+        response,
+        400,
+        rpcError(null, -32600, "Invalid JSON-RPC request."),
+      );
+      return;
+    }
+    if (DISALLOWED_METHOD.test(payload.method)) {
+      this.record(
+        requestInfo,
+        "invalid_request",
+        started,
+        false,
+        "unsupported_method",
+      );
+      writeJson(
+        response,
+        400,
+        rpcError(
+          id ?? null,
+          -32601,
+          "Method is not supported by this read-only proxy.",
+        ),
+      );
+      return;
+    }
+    if (this.blackoutActive()) {
+      this.record(
+        requestInfo,
+        "injected_blackout",
+        started,
+        true,
+        "injected_blackout",
+      );
+      writeJson(
+        response,
+        200,
+        rpcError(id ?? null, -32098, "BLOCKLAB injected RPC blackout."),
+      );
+      return;
+    }
+    const controller = new AbortController();
+    this.activeRequests.add(controller);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.config.upstreamTimeoutMs,
+    );
+    try {
+      const upstreamResponse = await fetch(this.config.upstreamUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        signal: controller.signal,
+      });
+      const upstreamBody = await upstreamResponse.text();
+      response.writeHead(upstreamResponse.status, {
+        "content-type":
+          upstreamResponse.headers.get("content-type") ?? "application/json",
+      });
+      response.end(upstreamBody);
+      this.record(
+        requestInfo,
+        upstreamResponse.ok ? "forwarded_success" : "forwarded_error",
+        started,
+        false,
+        upstreamResponse.ok ? undefined : "upstream_http",
+      );
+    } catch (error) {
+      const timedOut =
+        error instanceof DOMException && error.name === "AbortError";
+      const category = timedOut ? "upstream_timeout" : "upstream_unavailable";
+      const errorCategory = timedOut
+        ? "upstream_timeout"
+        : "upstream_connection";
+      this.record(requestInfo, category, started, false, errorCategory);
+      if (!response.writableEnded) {
+        writeJson(
+          response,
+          200,
+          rpcError(
+            id ?? null,
+            timedOut ? -32001 : -32002,
+            timedOut
+              ? "Upstream RPC request timed out."
+              : "Upstream RPC endpoint is unavailable.",
+          ),
+        );
+      }
+    } finally {
+      clearTimeout(timeout);
+      this.activeRequests.delete(controller);
+    }
+  }
+}
+
+export function runRpcBlackout<T>(
+  config: RpcBlackoutExecutionConfig,
+  workload: RpcBlackoutWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-blackout",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-blackout",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.blackout ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
 }
 
 interface CleanupResource {

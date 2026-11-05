@@ -69,9 +69,9 @@
 | RUN-01 | P0 | Implement lifecycle runner | ARC-03 | Preflight through cleanup and evaluation emit ordered events | DONE |
 | RUN-02 | P0 | Add timeout, cancellation, and emergency stop | RUN-01 | Active runs stop safely with explicit status | DONE |
 | RUN-03 | P0 | Enforce loopback safety | RUN-01 | Default targets reject non-loopback endpoints | DONE |
-| RUN-04 | P0 | Implement local RPC proxy | DEMO-02; RUN-03 | Normal JSON-RPC requests forward unchanged | TODO |
-| RUN-05 | P0 | Implement bounded RPC fault injection | RUN-04 | Timeout/connection failure applies only during the fault window | TODO |
-| RUN-06 | P0 | Capture proxy metrics and redacted events | RUN-04 | Counts, latency, IDs, timestamps, status, and error categories are recorded | TODO |
+| RUN-04 | P0 | Implement local RPC proxy | DEMO-02; RUN-03 | Normal JSON-RPC requests forward unchanged | DONE |
+| RUN-05 | P0 | Implement bounded RPC fault injection | RUN-04 | Timeout/connection failure applies only during the fault window | DONE |
+| RUN-06 | P0 | Capture proxy metrics and redacted events | RUN-04 | Counts, latency, IDs, timestamps, status, and error categories are recorded | DONE |
 | RUN-07 | P0 | Implement rpc-blackout scenario | RUN-01; RUN-05; DEMO-03 | Baseline, outage, observation, restoration, and cleanup are captured | TODO |
 | RUN-08 | P0 | Implement deterministic evaluator | RUN-07 | Result is one of passed, failed, partial, inconclusive | TODO |
 | RUN-09 | P0 | Persist local evidence and digest | RUN-08 | Run can be listed/opened without sensitive payloads | TODO |

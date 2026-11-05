@@ -152,6 +152,12 @@ through every experiment phase remains part of the later runner/proxy work.
 9. Restore forwarding and capture recovery checks.
 10. Ensure proxy and local processes close in every exit path.
 
+Phase 09 foundation status: the loopback proxy, bounded blackout window,
+redacted proxy evidence, and runner cleanup integration are implemented and
+tested. CLI orchestration, application-level baseline/recovery observations,
+and evaluator work remain for Phase 10/11; no end-to-end CLI run is claimed by
+this phase.
+
 **Exit gate:** One repeatable local run demonstrates baseline, outage, restoration, and cleanup.
 
 ## Phase 10 — Evidence, evaluator, replay, and comparison
