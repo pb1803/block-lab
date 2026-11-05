@@ -83,13 +83,13 @@
 |---|---|---|---|---|---|
 | CLI-01 | P0 | Implement `blocklab init` | ARC-02 | Config is created without overwriting user files | TODO |
 | CLI-02 | P0 | Implement `blocklab inspect` | INS-07 | Human and JSON output are available | DONE |
-| CLI-03 | P0 | Implement `blocklab scenarios` | RUN-07 | Lists scenario, preconditions, and safety scope | TODO |
-| CLI-04 | P0 | Implement `blocklab test rpc-blackout` | RUN-10 | Runs the local experiment end to end | TODO |
-| CLI-05 | P0 | Implement `blocklab replay` | CLI-04 | Replays a stored experiment after validation | TODO |
-| CLI-06 | P0 | Implement `blocklab compare` | CLI-05 | Shows comparable metric differences | TODO |
-| CLI-07 | P0 | Implement `blocklab report` | CLI-04 | Exports JSON and Markdown reports | TODO |
-| CLI-08 | P0 | Add help and stable exit codes | CLI-01; CLI-04 | Invalid input and run failures are actionable | TODO |
-| CLI-09 | P0 | Verify local-only operation | CLI-04 | Core workflow runs without Studio or hosted account | TODO |
+| CLI-03 | P0 | Implement `blocklab scenarios` | RUN-07 | Lists scenario, preconditions, and safety scope | DONE |
+| CLI-04 | P0 | Implement `blocklab test rpc-blackout` | RUN-10 | Runs the local experiment end to end | DONE |
+| CLI-05 | P0 | Implement `blocklab replay` | CLI-04 | Replays a stored experiment after validation | DONE |
+| CLI-06 | P0 | Implement `blocklab compare` | CLI-05 | Shows comparable metric differences | DONE |
+| CLI-07 | P0 | Implement `blocklab report` | CLI-04 | Exports JSON and Markdown reports | DONE |
+| CLI-08 | P0 | Add help and stable exit codes | CLI-01; CLI-04 | Invalid input and run failures are actionable | DONE |
+| CLI-09 | P0 | Verify local-only operation | CLI-04 | Core workflow runs without Studio or hosted account | DONE |
 
 ## Anon-RPC primary integration
 

@@ -497,6 +497,10 @@ export class RpcProxy {
     return this.address;
   }
 
+  public get experimentStartedAt(): string {
+    return new Date(this.startedAt).toISOString();
+  }
+
   public async start(): Promise<RpcProxyAddress> {
     if (this.address !== undefined) return this.address;
     const host = this.config.host ?? "127.0.0.1";

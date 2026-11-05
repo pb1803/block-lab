@@ -194,6 +194,12 @@ this phase does not claim CLI orchestration.
 9. Require confirmation for authorized staging mode.
 10. Verify the core workflow without Studio or a hosted account.
 
+Phase 11 status: `inspect`, `scenarios`, `test rpc-blackout`, `runs`,
+`report`, `replay`, `compare`, `config`, help/version output, stable exit
+codes, local evidence storage, signal cancellation, and npm packaging metadata
+are implemented. `blocklab init` and authorized staging confirmation remain
+unimplemented.
+
 **Exit gate:** The local CLI is independently useful and has actionable failure messages.
 
 ## Phase 12 — Anon-RPC browser POC

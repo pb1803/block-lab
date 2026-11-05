@@ -26,9 +26,10 @@ These integrations are planned and are not implemented yet.
 
 ## Project status
 
-Planning and workspace bootstrap.
-
-BLOCKLAB is under development. The repository currently contains project requirements and bootstrap documentation; application code and dependencies have not yet been added.
+The local inspector, loopback RPC proxy, deterministic `rpc-blackout`
+experiment, evidence evaluator, replay/comparison APIs, and first-class CLI are
+implemented. Studio, Anon-RPC, Arkiv, ENSv2, automatic failover, and hosted
+services remain out of scope for the current local workflow.
 
 ## Package manager
 
@@ -51,7 +52,8 @@ pnpm test
 pnpm build
 ```
 
-The repository is a pnpm workspace. The initial implementation contains shared domain and boundary packages plus a minimal CLI and Studio shell. Anon-RPC, Arkiv, ENSv2, and the RPC blackout runner are not implemented yet.
+The repository is a pnpm workspace. The implementation contains shared domain and boundary packages plus a local
+CLI and minimal Studio shell.
 
 Inspect a local project without executing its scripts:
 
@@ -63,6 +65,28 @@ node apps/cli/dist/index.js inspect path/to/project --json
 
 Inspection output is evidence-labelled and redacts environment values, credentials,
 tokens, and private-key material.
+
+Run a local read-only RPC blackout experiment. An explicit loopback upstream is
+required; no public RPC endpoint is selected automatically:
+
+```powershell
+node apps/cli/dist/index.js test rpc-blackout `
+  --upstream http://127.0.0.1:8545
+node apps/cli/dist/index.js runs list
+node apps/cli/dist/index.js report <execution-id>
+node apps/cli/dist/index.js replay <execution-id> `
+  --upstream http://127.0.0.1:8545
+node apps/cli/dist/index.js compare <execution-a> <execution-b>
+```
+
+Evidence is stored outside the inspected project by default. Use
+`--evidence-dir <path>` or `BLOCKLAB_EVIDENCE_DIR` to override it. On Windows
+the default is `%APPDATA%\blocklab\evidence`; on macOS it is
+`~/Library/Application Support/blocklab/evidence`; on Linux it is
+`$XDG_DATA_HOME/blocklab/evidence` or `~/.local/share/blocklab/evidence`.
+
+The package is prepared for a future npm publication as `blocklab`, but it has
+not been published.
 
 The Phase 07 sample dApp and local Anvil instructions are documented in
 [docs/sample-dapp.md](docs/sample-dapp.md).

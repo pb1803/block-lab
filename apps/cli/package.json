@@ -1,9 +1,22 @@
 {
-  "name": "@blocklab/cli",
-  "private": true,
+  "name": "blocklab",
+  "version": "0.1.0",
+  "description": "Local-first Ethereum dApp resilience testing CLI.",
+  "license": "MIT",
+  "private": false,
   "type": "module",
+  "files": [
+    "dist/cli.js",
+    "dist/cli.d.ts",
+    "dist/index.js",
+    "dist/index.d.ts",
+    "README.md"
+  ],
   "bin": {
     "blocklab": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

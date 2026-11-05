@@ -101,3 +101,16 @@ proves proxy/request behavior only; it does not claim application-level
 failover. Evidence can be written to a local versioned JSON file, replayed as
 configuration with new IDs, and compared to another compatible run. No CLI
 experiment command is provided yet.
+
+The built CLI can run the same read-only request schedule without executing
+the sample project's scripts:
+
+```powershell
+pnpm --filter blocklab build
+node apps/cli/dist/index.js test rpc-blackout `
+  --upstream http://127.0.0.1:8545
+```
+
+Use the printed execution ID with `runs show` or `report`. An explicit local
+upstream is mandatory and the command does not claim recovery unless a
+post-blackout request succeeds.

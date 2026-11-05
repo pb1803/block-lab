@@ -132,3 +132,22 @@ configurations differ; it does not infer causation or application failover.
 Evidence persistence is local JSON only. Writes create a temporary file and
 atomically link it into place without overwriting an existing record. Reads
 validate the schema, and malformed or unsupported files fail explicitly.
+
+## First-class CLI
+
+`apps/cli` is a local Node.js composition layer. It does not duplicate
+inspection, proxy, evaluation, or persistence logic: commands call the
+corresponding package APIs. `inspect` reads projects without running scripts;
+`test rpc-blackout` generates read-only `eth_chainId` observations against an
+explicit loopback upstream; `runs`, `report`, `replay`, and `compare` operate
+on validated local evidence records. Replay stores only the normalized schedule
+and requires a new explicit upstream because full upstream URLs are not
+persisted.
+
+The default evidence directory is platform-specific and outside inspected
+projects. `--evidence-dir` takes precedence over the
+`BLOCKLAB_EVIDENCE_DIR` override, followed by the platform default. CLI exit
+codes are `0` for success, `2` for usage errors, `3` for operation failures,
+and `4` when evidence is inconclusive. The CLI handles SIGINT/SIGTERM by
+requesting cooperative execution cancellation; proxy cleanup remains owned by
+the runner lifecycle.
