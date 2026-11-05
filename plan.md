@@ -256,8 +256,14 @@ and no direct fallback. `nym` and `nox` were not successfully exercised, and no
 anonymity property is claimed or measured. The CLI states that the harness is
 browser-only and never simulates it.
 
-ANON-03 (Viem adapter) was completed afterwards as a separate change; the Studio
-comparison view (`ANON-08`) is still open.
+ANON-03 (Viem adapter) and ANON-08 (read-only Studio comparison view) were
+completed afterwards as separate changes. The Studio panel renders the
+`RouteComparison` payload and the Viem probe results without executing any RPC
+request itself: it validates untrusted input, recomputes coverage from the
+attempts, keeps skipped methods distinct from successes, labels `passthrough` as
+a non-anonymizing reference worker, and states that latency is not privacy. A
+future Studio phase may add orchestration behind the local-agent boundary, but
+the comparison panel stays read-only.
 
 **Exit gate:** The supported browser demo routes eligible reads through Anon-RPC by default, or the feature is dropped.
 

@@ -54,6 +54,9 @@ importers:
       '@blocklab/browser-rpc':
         specifier: workspace:*
         version: link:../../packages/browser-rpc
+      '@blocklab/studio':
+        specifier: workspace:*
+        version: link:../studio
       viem:
         specifier: 2.57.16
         version: 2.57.16(typescript@5.9.3)
@@ -64,6 +67,9 @@ importers:
 
   apps/studio:
     dependencies:
+      '@blocklab/browser-rpc':
+        specifier: workspace:*
+        version: link:../../packages/browser-rpc
       '@blocklab/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "@blocklab/browser-rpc": "workspace:*",
-    "viem": "2.57.16"
+    "viem": "2.57.16",
+    "@blocklab/studio": "workspace:*"
   },
   "devDependencies": {
     "vite": "^7.0.0"

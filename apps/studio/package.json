@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./comparison": "./dist/comparison/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@blocklab/browser-rpc": "workspace:*",
     "@blocklab/core": "workspace:*"
   }
 }

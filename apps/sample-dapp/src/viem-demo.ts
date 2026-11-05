@@ -1,20 +1,12 @@
 import type { RpcTransport } from "@blocklab/browser-rpc";
 import { createViemRoute } from "@blocklab/browser-rpc/viem";
+import type { ViemProbeResult } from "@blocklab/studio/comparison";
 import { createPublicClient } from "viem";
 import { mainnet } from "viem/chains";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
-export interface ViemProbe {
-  readonly route: RpcTransport["route"];
-  readonly ok: boolean;
-  readonly chainId?: number;
-  readonly blockNumber?: string;
-  readonly balanceWei?: string;
-  readonly callData?: string;
-  readonly errorCategory?: string;
-  readonly errorMessage?: string;
-}
+export type ViemProbe = ViemProbeResult;
 
 /**
  * Demonstrates the Viem adapter with the standard public-client interface. The

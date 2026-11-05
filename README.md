@@ -52,6 +52,14 @@ runs the same workload on both routes and reports method, route, timestamps,
 latency, success/failure, error category, worker readiness, harness-routed
 count, coverage, and the privacy limits of the measurement.
 
+The comparison panel is rendered by the read-only Studio view
+(`@blocklab/studio/comparison`). The page publishes a snapshot and Studio
+validates and presents it: it recomputes coverage from the attempts, marks
+methods that were never attempted as skipped rather than successful, reports
+Viem probe results separately, and states that latency is not privacy and that
+the `passthrough` reference worker does not anonymize anything. Studio never
+issues an RPC request and never polls.
+
 Existing Viem applications can use the same routes through
 `@blocklab/browser-rpc/viem`:
 
@@ -70,6 +78,7 @@ Headless-browser verification (no browser-automation dependency):
 
 ```bash
 node scripts/browser-selftest.mjs --url http://127.0.0.1:5173/ --timeout 200000
+node scripts/studio-view-check.mjs --url http://127.0.0.1:5173/ --timeout 200000
 ```
 
 Verified on 2026-11-05 in HeadlessChrome 156 against

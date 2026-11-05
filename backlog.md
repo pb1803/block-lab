@@ -102,7 +102,7 @@
 | ANON-05 | P1 | Measure direct versus Anon-RPC | ANON-04 | Coverage, success rate, latency, and exclusions are recorded | DONE |
 | ANON-06 | P1 | Route eligible demo reads by default | ANON-05 | Browser demo default path uses Anon-RPC for supported reads | DONE |
 | ANON-07 | P1 | Add privacy comparison reporting | ANON-06 | Measured facts and documented limitations are separated | DONE |
-| ANON-08 | P1 | Add Studio Anon-RPC view | ANON-07 | UI displays route coverage and comparison without anonymity overclaims | TODO |
+| ANON-08 | P1 | Add Studio Anon-RPC view | ANON-07 | UI displays route coverage and comparison without anonymity overclaims | DONE |
 | ANON-09 | P1 | Add end-to-end sponsor evidence | ANON-06 | Evidence proves actual default routing and app behavior | DONE |
 | ANON-10 | P2 | Keep CLI boundary explicit | ANON-01 | CLI reports browser-only limitation and never simulates the harness | DONE |
 
@@ -110,7 +110,13 @@ ANON-03 is delivered as the `@blocklab/browser-rpc/viem` entry point (Viem
 2.57.16, optional peer dependency). It reuses the existing transports, keeps the
 read-only allowlist and no-fallback guarantee, and was verified with a real Viem
 public client in headless Chrome on both the `passthrough` and `tor-js` workers
-(`getChainId`, `getBlockNumber`, `getBalance`, and `eth_call`). ANON-04 was
+(`getChainId`, `getBlockNumber`, `getBalance`, and `eth_call`). ANON-08 adds the
+read-only Studio comparison panel (`@blocklab/studio/comparison`): the host page
+publishes a `StudioRpcSnapshot`, Studio validates it, recomputes coverage from the
+attempts, keeps skipped methods distinct from successes, reports Viem results
+separately, and renders fixed privacy limitations. Verified in headless Chrome on
+2026-11-05 for passthrough, `tor-js`, and a failing `nox` worker, plus empty,
+live-refresh, and malformed-payload paths. ANON-04 was
 originally verified without an adapter. Verified on 2026-11-05 in headless
 Chrome 156: `tor-js` (network worker, mainnet specifier) routed 4/4 eligible
 reads; `passthrough` (reference worker) routed 4/4 and is not anonymizing; a

@@ -11,3 +11,18 @@ export const studioShell: StudioShell = {
   localAgentRequired: true,
   project: null,
 };
+
+export {
+  type CoverageView,
+  createStudioSnapshot,
+  type MethodRow,
+  type MountedComparisonView,
+  mountComparisonView,
+  parseStudioSnapshot,
+  STUDIO_COMPARISON_EVENT,
+  STUDIO_COMPARISON_SCHEMA_VERSION,
+  type StudioComparisonModel,
+  type StudioComparisonState,
+  type StudioRpcSnapshot,
+  type ViemProbeResult,
+} from "./comparison/index.js";

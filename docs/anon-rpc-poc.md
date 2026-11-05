@@ -232,6 +232,34 @@ A separate interactive check of `apps/anon-rpc-poc` (passthrough) exercised
 initialize → four routed requests → close → page still usable, with latencies
 1355/560/834/872 ms.
 
+### Studio comparison view runs (2026-11-05)
+
+`scripts/studio-view-check.mjs` drives headless Chrome the same way, waits for
+the page to publish its snapshot, and then inspects the DOM that
+`@blocklab/studio/comparison` rendered (route cards, method rows, coverage, Viem
+cards, alert state). It does not re-run any request: Studio only renders the
+payload the page already produced.
+
+| run | worker | rendered routes | coverage | Viem cards |
+|---|---|---|---|---|
+| G | `passthrough` (reference) | direct ready 4/4, Anon ready 4/4, worker `passthrough` labelled *not anonymizing* | 100% | both succeeded |
+| H | `tor-js` (network) | direct ready 4/4, Anon ready 4/4, worker `tor-js` labelled *network (declared anonymizing)* | 100% | both succeeded |
+| I | `nox` with a mainnet bootstrap | direct ready 4/4, Anon `failed`, error `short bytes32 return` | 0% (4 skipped) | direct ok, Anon not run |
+
+Run H sample row: `eth_chainId` succeeded on both routes with separate measured
+latencies and harness-routed `yes`. Run I sample row: `eth_chainId` failed on
+the Anon route with category `not-ready`, harness-routed `no`, and the summary
+line read "Anon-RPC did not become ready; no harness request was attempted and
+no fallback occurred". A failed attempt's duration renders as `0 ms (failed)`
+rather than a plain latency.
+
+Live refresh was verified without the self-test flag: the page opened on
+"No comparison yet" (140 characters), **Compare routes** was clicked, and the
+same panel re-rendered both routes and the four method rows (1989 characters) —
+no reload, no polling in Studio. Injecting `{ schemaVersion: "1.0", comparison:
+null }` into `window.__blocklabStudioSnapshot` replaced the panel with a
+`role="alert"` block listing the issue, with zero fabricated rows.
+
 ## What these numbers do and do not show
 
 They show that eligible read-only calls were routed through a hash-pinned,

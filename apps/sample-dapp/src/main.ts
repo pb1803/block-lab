@@ -9,9 +9,15 @@ import {
   runWorkload,
   summarizeRoute,
 } from "@blocklab/browser-rpc";
+import {
+  createStudioSnapshot,
+  mountComparisonView,
+  STUDIO_COMPARISON_EVENT,
+  type StudioRpcSnapshot,
+  type ViemProbeResult,
+} from "@blocklab/studio/comparison";
 import { readConfig, workerDescription } from "./config.js";
 import {
-  renderComparison,
   renderObservations,
   renderRouteDetail,
   renderStatus,
@@ -45,8 +51,44 @@ let direct: DirectRpcTransport | undefined;
 let anon: AnonRpcTransport | undefined;
 let activeRoute: RouteKind = "direct";
 let lastComparison: RouteComparison | undefined;
+let lastViem: {
+  direct?: ViemProbeResult;
+  anonRpc?: ViemProbeResult;
+} = {};
 
-type SampleWindow = Window & { __blocklabComparison?: RouteComparison };
+type SampleWindow = Window & {
+  __blocklabComparison?: RouteComparison;
+  __blocklabStudioSnapshot?: StudioRpcSnapshot;
+};
+
+const comparisonContainer = requireElement<HTMLDivElement>("#comparison");
+const mountedComparison = mountComparisonView(comparisonContainer, {
+  read: () => (window as SampleWindow).__blocklabStudioSnapshot,
+  subscribe: (listener) => {
+    window.addEventListener(STUDIO_COMPARISON_EVENT, listener);
+    return () => window.removeEventListener(STUDIO_COMPARISON_EVENT, listener);
+  },
+});
+
+/**
+ * Publishes the single snapshot Studio renders. Studio is read-only: this page
+ * owns execution and the payload, and Studio owns presentation.
+ */
+function publishSnapshot(): void {
+  if (lastComparison === undefined) {
+    mountedComparison.refresh();
+    return;
+  }
+  const hasViem =
+    lastViem.direct !== undefined || lastViem.anonRpc !== undefined;
+  const snapshot = createStudioSnapshot({
+    comparison: lastComparison,
+    ...(hasViem ? { viem: { ...lastViem } } : {}),
+    runtime: { userAgent: navigator.userAgent, url: location.href },
+  });
+  (window as SampleWindow).__blocklabStudioSnapshot = snapshot;
+  window.dispatchEvent(new Event(STUDIO_COMPARISON_EVENT));
+}
 
 function selectedRoute(): RouteKind {
   return routeInputs.find((input) => input.checked)?.value === "anon-rpc"
@@ -170,7 +212,7 @@ async function runComparison(): Promise<void> {
 
   observations.push(...directObservations, ...anonObservations);
   renderObservations(observations);
-  renderComparison(comparison);
+  publishSnapshot();
   renderStatus(
     `Comparison complete. Direct ${directSummary.successRatePct}% (${directSummary.succeeded}/${directSummary.total}) and Anon-RPC ${anonSummary.successRatePct}% (${anonSummary.succeeded}/${anonSummary.total}) success. Latency is not a privacy measurement.`,
     anonSummary.failed === 0 && directSummary.failed === 0
@@ -230,6 +272,8 @@ async function runViem(): Promise<void> {
   renderStatus(`Running the Viem public client via ${activeRoute}…`, "info");
   const probe = await runViemProbe(transport);
   renderViemProbe(probe);
+  lastViem = { ...lastViem, [transport.route]: probe };
+  publishSnapshot();
   renderStatus(
     probe.ok
       ? `Viem client completed four calls via ${activeRoute}.`
@@ -274,7 +318,13 @@ if (selfTest) {
         worker: configResult.config.worker,
       });
       lastComparison = result.comparison;
-      renderComparison(result.comparison);
+      lastViem = {
+        ...(result.viem.direct === null ? {} : { direct: result.viem.direct }),
+        ...(result.viem.anonRpc === null
+          ? {}
+          : { anonRpc: result.viem.anonRpc }),
+      };
+      publishSnapshot();
       renderStatus(
         result.ok
           ? "Self-test complete: both routes succeeded."

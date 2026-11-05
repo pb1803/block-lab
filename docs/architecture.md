@@ -8,7 +8,7 @@
 - `@blocklab/runner` owns Node.js experiment lifecycle concerns, including process ownership, cancellation, loopback enforcement, and future proxy execution.
 - `@blocklab/evidence` owns redacted local result persistence, evaluation, digesting, and report formatting.
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
-- `apps/studio` is currently a browser-safe shell. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
+- `apps/studio` is a browser-safe shell plus one read-only comparison panel. It renders payloads the host page already produced, never executes RPC requests, never polls, and does not anonymize anything. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
 - `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. It also exposes an optional Viem adapter (`@blocklab/browser-rpc/viem`, Viem as an optional peer dependency) that delegates every request to those transports. Nothing in the Node.js dependency graph imports it.
 
 ## Dependency direction
@@ -24,10 +24,32 @@ core
 ├── apps/cli ──> inspector, scenarios, runner, evidence
 ├── apps/sample-dapp ──> browser-rpc
 ├── apps/anon-rpc-poc ──> browser-rpc
-└── apps/studio ──> core
+├── apps/studio ──> core, browser-rpc
 ```
 
 The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv will be added later behind an integration interface, after a real proof of concept.
+
+### Studio comparison view
+
+`apps/studio/src/comparison` owns the read-only RPC comparison UI and its schema
+(`StudioRpcSnapshot`, schema `1.0`). The payload contract is:
+
+- `comparison` — the `RouteComparison` object from `@blocklab/browser-rpc`
+  (`window.__blocklabComparison` on the sample page): per-route state, worker
+  identity, attempts, latency, harness routing, and coverage.
+- `viem?` — Viem public-client probe results, reported separately from the raw
+  RPC observations.
+- `runtime?` — optional page metadata; never rendered as a claim.
+
+The page publishes the snapshot and dispatches `blocklab:comparison`; Studio
+reads it through `mountComparisonView(container, { read, subscribe })`. Studio
+recomputes coverage from the attempts (`routed ÷ eligible`), marks unmeasured
+methods as skipped, drops invalid entries, redacts error text, and refuses to
+substitute missing values. An absent payload renders an empty state and a
+malformed one renders an alert listing the issues. Latency is reported as a
+transport measurement only; `passthrough` is labelled as a non-anonymizing
+reference worker, and routing is never presented as anonymity. There is no
+Studio-side RPC engine, so the panel cannot diverge from the measured data.
 
 `apps/anon-rpc-poc` is a thin browser-only Vite application over the shared
 package: it exposes explicit initialize/run/close buttons and a worker selector,

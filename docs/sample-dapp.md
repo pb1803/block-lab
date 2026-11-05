@@ -34,7 +34,10 @@ average latency, harness-routed count, and the privacy limits), **Run Viem
 client** (the same route through Viem's `createPublicClient`, calling
 `getChainId`, `getBlockNumber`, `getBalance`, and one read-only contract
 `call`), and **Close worker**. The comparison payload is also available as
-`window.__blocklabComparison`.
+`window.__blocklabComparison`, and the same data is published as a
+`StudioRpcSnapshot` (`window.__blocklabStudioSnapshot`) so
+`@blocklab/studio/comparison` can render the panel read-only. The page owns
+execution; Studio never issues a request.
 
 The local experiment flow is:
 
@@ -90,14 +93,20 @@ are not stored.
 With Anvil running and `VITE_RPC_URL=http://127.0.0.1:8545`, the direct route
 shows four successful reads with the reported chain ID `31337` and latest block,
 plus measured per-request latency. With a worker configured, the Anon-RPC route
-shows the same methods marked as harness-routed, and the comparison panel shows
-both routes side by side.
+shows the same methods marked as harness-routed, and the Studio comparison
+panel shows both routes side by side with per-method latency, harness routing,
+coverage, and the explicit privacy limitations.
 
 Headless-browser verification of the same page (no automation dependency):
 
 ```powershell
 node scripts/browser-selftest.mjs --url http://127.0.0.1:5173/ --timeout 200000
+node scripts/studio-view-check.mjs --url http://127.0.0.1:5173/ --timeout 200000
 ```
+
+The second script inspects the rendered Studio panel instead of the payload
+(`--wait-selector`, `--after-click`, and `--inject-invalid` exercise the empty,
+live-refresh, and invalid-payload paths).
 
 When the endpoint is unavailable, the page shows a categorized RPC error and
 does not display the configured endpoint. When the worker fails to initialize,
