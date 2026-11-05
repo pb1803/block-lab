@@ -153,8 +153,9 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 - **ARK-03 BLOCKED (awaiting faucet)**: the harness is ready and idempotent
   (`poc-write-001`, live duplicate preflight shared with the gateway, post-failure
   re-check, no blind retry) and was run against the real chain (blocked at
-  `0 tGLM`, exit 2, nothing signed). Prepared signer:
-  `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` (key in git-ignored
+  `0 tGLM`, exit 2, nothing signed). Prepared signer (rotated after an
+  exposure report; old address retired):
+  `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` (key in git-ignored
   `apps/arkiv-poc/.env.local`). The official faucet needs a browser wallet
   session + captcha (24 h cooldown) — a human step. Anonymous `arkiv_query`
   budget intermittently 429s (`ANON_COST_LIMITED`); an access key removes it.

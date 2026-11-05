@@ -28,11 +28,14 @@ ownership experiment or an expiry experiment that did not happen.
 
 A dedicated Rabdi testnet account was generated locally
 (`apps/arkiv-poc/.env.local`, which is git-ignored; the key value is never
-printed, committed, logged or shown):
+printed, committed, logged or shown). **Rotated on 2026-11-05** after the
+previous signer was reported exposed; the old address
+(`0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A`) is retired and must not be
+funded or used:
 
 | Item | Value |
 |---|---|
-| Signer address | `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` |
+| Signer address | `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` |
 | Balance (verified live, 2026-11-05) | `0 tGLM` |
 | Where the key lives | `apps/arkiv-poc/.env.local` (`ARKIV_PRIVATE_KEY`, git-ignored) |
 
@@ -52,7 +55,7 @@ UI bundle and `docs.arkiv.network/networks/rabdi/`:
 * **To run:** open the URL in a browser, connect the wallet, set the recipient
   to the signer address above, solve the captcha, claim. Expected result: a
   claim transaction appears on Rabdi and
-  `eth_getBalance(0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A)` becomes
+  `eth_getBalance(0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759)` becomes
   non-zero.
 
 No faucet API keyed only by an address exists; no bypass was attempted.
@@ -265,10 +268,10 @@ no funds (real live chain, no mocking):
 access key: none (public, rate-limited endpoint)
 chain id: 7794095
 preflight: no entity with experimentId "poc-write-001"
-signer: 0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A (from .env.local, value not printed)
+signer: 0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759 (from .env.local, value not printed)
 balance: 0 wei (0 tGLM)
 BLOCKED: the signer has no tGLM on Rabdi, so no transaction can be paid for.
-Fund 0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A at
+Fund 0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759 at
 https://hub.arkiv.network/faucet (Rabdi, tGLM). Nothing was signed and no
 entity was written.
 exit=2
@@ -292,7 +295,7 @@ followed by a refusal to sign, not a mocked test.
 
 1. **No real entity write — awaiting one human faucet claim.** The harness and
    the POC are ready, but the prepared signer
-   `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` still holds `0 tGLM`.
+   `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` still holds `0 tGLM`.
    The official faucet requires a browser wallet session, a captcha and a
    cooldown (default 24 hours), so it cannot be completed from this
    environment; no bypass was attempted. Consequence: there is no real
