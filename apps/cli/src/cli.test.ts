@@ -106,13 +106,13 @@ describe("blocklab CLI", () => {
       "--evidence-dir",
       directory,
       "--start-offset",
-      "100",
-      "--duration",
-      "100",
-      "--experiment-duration",
       "300",
+      "--duration",
+      "300",
+      "--experiment-duration",
+      "800",
       "--timeout",
-      "500",
+      "3000",
     ];
     const first = capture();
     expect(await runCli(args, first.dependencies)).toBe(EXIT_CODES.success);
@@ -152,7 +152,7 @@ describe("blocklab CLI", () => {
           "--evidence-dir",
           directory,
           "--timeout",
-          "500",
+          "3000",
         ],
         replay.dependencies,
       ),

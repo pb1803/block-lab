@@ -24,6 +24,11 @@ core
 
 The browser-only Anon-RPC harness will remain outside the Node.js CLI dependency graph. Arkiv will be added later behind an integration interface, after a real proof of concept.
 
+`apps/anon-rpc-poc` is an isolated browser-only Vite application. It owns the
+`@anon-rpc/browser-harness@0.4.0` dependency and uses a one-time bootstrap
+provider plus the harness's bound `fetch`. It is not part of the CLI or runner
+dependency graph, and it has no ordinary-RPC fallback.
+
 ## Experiment data flow
 
 ```text
@@ -151,3 +156,13 @@ codes are `0` for success, `2` for usage errors, `3` for operation failures,
 and `4` when evidence is inconclusive. The CLI handles SIGINT/SIGTERM by
 requesting cooperative execution cancellation; proxy cleanup remains owned by
 the runner lifecycle.
+
+## Anon-RPC browser POC
+
+The POC explicitly initializes `AnonRpcWorker`, awaits `worker.ready`, invokes
+only four read-only Ethereum methods, collects worker logs through
+`acceptLog({ signal })`, and calls `worker.close()` during cleanup. The
+bootstrap provider is separate from harness-routed requests and is used only
+to read the on-chain worker specifier. The official passthrough worker proves
+the browser sandbox and hash-pinned loading boundary; it does not prove
+anonymizing routing or privacy.

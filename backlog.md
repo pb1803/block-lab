@@ -95,8 +95,8 @@
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| ANON-01 | P1 | Add browser POC fixture | CLI-09 | `@anon-rpc/browser-harness@0.4.0` is used only in a browser | TODO |
-| ANON-02 | P1 | Verify worker lifecycle and errors | ANON-01 | Ready, fetch, close, and failure paths are observed | TODO |
+| ANON-01 | P1 | Add browser POC fixture | CLI-09 | `@anon-rpc/browser-harness@0.4.0` is used only in a browser | DONE |
+| ANON-02 | P1 | Verify worker lifecycle and errors | ANON-01 | Ready, fetch, close, and failure paths are observed | DONE |
 | ANON-03 | P1 | Verify Viem adapter | ANON-02 | Exact type-safe adapter is proven by a working read | TODO |
 | ANON-04 | P1 | Verify real anonymizing worker | ANON-03 | Official worker performs an eligible read successfully | TODO |
 | ANON-05 | P1 | Measure direct versus Anon-RPC | ANON-04 | Coverage, success rate, latency, and exclusions are recorded | TODO |

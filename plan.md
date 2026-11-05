@@ -215,6 +215,13 @@ unimplemented.
 9. Record coverage, success rate, latency, and exclusions without raw payloads.
 10. Make a go/no-go decision based on working default routing.
 
+Phase 12 status: the isolated browser POC uses the verified
+`@anon-rpc/browser-harness@0.4.0` constructor, readiness, fetch, log, and
+cleanup APIs. Automated lifecycle tests pass. A real browser run verified
+initialization, four read-only requests, error visibility, and cleanup against
+the official passthrough worker. Actual anonymizing-worker routing remains
+unverified; the passthrough worker must not be described as anonymous.
+
 **Exit gate:** Anon-RPC is either proven in the browser or explicitly excluded from sponsor claims.
 
 ## Phase 13 — Anon-RPC integration

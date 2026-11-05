@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLOCKLAB Anon-RPC POC</title>
+  </head>
+  <body>
+    <main>
+      <h1>BLOCKLAB Anon-RPC browser POC</h1>
+      <p>Harness tests are read-only and use the configured endpoint.</p>
+      <button id="initialize" type="button">Initialize worker</button>
+      <button id="run" type="button" disabled>Run read-only checks</button>
+      <button id="close" type="button" disabled>Close worker</button>
+      <p id="status">Worker not initialized.</p>
+      <pre id="results"></pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

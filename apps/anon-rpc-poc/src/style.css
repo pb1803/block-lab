@@ -1,0 +1,28 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #172033;
+  background: #f5f7fb;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+}
+
+main {
+  max-width: 52rem;
+  margin: 0 auto;
+  background: white;
+  padding: 2rem;
+  border-radius: 0.75rem;
+}
+
+button {
+  margin-right: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -21,6 +21,16 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.19.2)
 
+  apps/anon-rpc-poc:
+    dependencies:
+      '@anon-rpc/browser-harness':
+        specifier: 0.4.0
+        version: 0.4.0
+    devDependencies:
+      vite:
+        specifier: ^7.0.0
+        version: 7.3.7(@types/node@24.19.2)
+
   apps/cli:
     dependencies:
       '@blocklab/core':
@@ -87,6 +97,12 @@ importers:
         version: link:../core
 
 packages:
+
+  '@anon-rpc/browser-harness@0.4.0':
+    resolution: {integrity: sha512-9h+ks9lGmGTXE3fuFopowag+pLVJxhgmYG3SEBI1qk8ik7RGkxPT7Ub7RmbkDJ92/4VCa8gjT45BWoEnGynJYQ==}
+
+  '@anon-rpc/harness-core@0.4.0':
+    resolution: {integrity: sha512-ZFVeE0tkUgXPw1qu99s8JPKD4jFatHZ+nELisZ4WF+YMpCrBFIvpJe0qdCoLcmbhH1brbsC35qe8F1G3HxIbgA==}
 
   '@biomejs/biome@2.6.5':
     resolution: {integrity: sha512-n0sp74QbSVEkWXlH659TKv4oJNylwAvDeZ8K8vt/PbcF1xneuNWe57z/G0Bxfh00cufhWXF6DiStLM8+jcLUpg==}
@@ -315,6 +331,16 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
+
+  '@kpstreams/core@0.2.1':
+    resolution: {integrity: sha512-cx82IpcAG2OoteTrUbHECIm2jc5rJ0+O8qB7cKAXdvkN5oje4aOIiF8nb7nEk+LSMISz8Zz7znrj+gzSXEBKuw==}
+
+  '@kpstreams/webrtc-client@0.2.1':
+    resolution: {integrity: sha512-B4o0mN6QmSblhfaKy74xezV82LaIqp6tdZ05HBAuBV2sSw9wFsT3TY6xmMJeHOECWVwFJGnSit9k0RV6HnPPBw==}
+
+  '@noble/hashes@1.8.0':
+    resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
+    engines: {node: ^14.21.3 || >=16}
 
   '@rollup/rollup-android-arm-eabi@4.67.5':
     resolution: {integrity: sha512-FdWPeulkH+FH+rBzyKBD59tuVN4tRKvmVilSJm0OcnoYsQTpd9UhD78OaPcsYqo2fX6hCwAG0YIjrDLoQ3pR3g==}
@@ -724,6 +750,16 @@ packages:
 
 snapshots:
 
+  '@anon-rpc/browser-harness@0.4.0':
+    dependencies:
+      '@anon-rpc/harness-core': 0.4.0
+      '@kpstreams/webrtc-client': 0.2.1
+      '@noble/hashes': 1.8.0
+
+  '@anon-rpc/harness-core@0.4.0':
+    dependencies:
+      '@noble/hashes': 1.8.0
+
   '@biomejs/biome@2.6.5':
     optionalDependencies:
       '@biomejs/cli-android-arm64': 2.6.5
@@ -846,6 +882,14 @@ snapshots:
     optional: true
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
+
+  '@kpstreams/core@0.2.1': {}
+
+  '@kpstreams/webrtc-client@0.2.1':
+    dependencies:
+      '@kpstreams/core': 0.2.1
+
+  '@noble/hashes@1.8.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.67.5':
     optional: true
