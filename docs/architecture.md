@@ -103,3 +103,32 @@ execution cleanup stack, including timeout and cancellation paths.
 This phase does not launch imported project scripts, manage Anvil/Docker, or
 provide a hosted proxy. Cancellation signals cooperative tasks; an arbitrary
 uncooperative asynchronous task cannot be forcibly terminated by this library.
+
+## Evidence, evaluation, replay, and comparison
+
+`@blocklab/evidence` consumes the runner's redacted proxy records and terminal
+execution metadata; it does not depend on Node HTTP internals or create a
+second lifecycle. Evidence schema `1.0` stores the execution identity,
+`rpc-blackout` version `1.0.0`, normalized blackout schedule, terminal state,
+phase-labelled observations, evaluation, metrics, warnings, and limitations.
+Raw RPC bodies, parameters, credentials, query strings, and authorization
+headers are never persisted.
+
+Observations use the same half-open interval as the proxy:
+`[startOffsetMs, startOffsetMs + durationMs)`. Baseline is before the start,
+fault is inside the interval, and recovery is at or after the end. A run passes
+only when a healthy baseline, an observed injected blackout, and a successful
+post-blackout forwarding request are all established. Missing observations are
+`inconclusive`; genuine upstream failures are not counted as injected faults.
+Cancelled and timed-out executions cannot be reported as fully passed.
+
+Metrics use milliseconds and include counts by phase, forwarded successes,
+upstream errors, injected failures, invalid requests, average/median latency,
+recovery count, and time from blackout end to first successful recovery. Replay
+copies only the normalized schedule and creates new IDs. Comparison rejects
+incompatible schema versions and labels metrics as non-comparable when
+configurations differ; it does not infer causation or application failover.
+
+Evidence persistence is local JSON only. Writes create a temporary file and
+atomically link it into place without overwriting an existing record. Reads
+validate the schema, and malformed or unsupported files fail explicitly.

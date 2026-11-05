@@ -91,3 +91,13 @@ does not display the configured endpoint.
 - The runner does not forcibly terminate an uncooperative asynchronous task.
 - Full `blocklab test rpc-blackout` orchestration and evaluator are planned for
   later phases.
+
+## Phase 10 evidence
+
+The runner returns redacted proxy records after an execution. The evidence
+package normalizes those records with execution timestamps and the blackout
+schedule, then evaluates baseline, fault, and recovery independently. This
+proves proxy/request behavior only; it does not claim application-level
+failover. Evidence can be written to a local versioned JSON file, replayed as
+configuration with new IDs, and compared to another compatible run. No CLI
+experiment command is provided yet.

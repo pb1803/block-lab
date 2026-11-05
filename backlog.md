@@ -72,10 +72,10 @@
 | RUN-04 | P0 | Implement local RPC proxy | DEMO-02; RUN-03 | Normal JSON-RPC requests forward unchanged | DONE |
 | RUN-05 | P0 | Implement bounded RPC fault injection | RUN-04 | Timeout/connection failure applies only during the fault window | DONE |
 | RUN-06 | P0 | Capture proxy metrics and redacted events | RUN-04 | Counts, latency, IDs, timestamps, status, and error categories are recorded | DONE |
-| RUN-07 | P0 | Implement rpc-blackout scenario | RUN-01; RUN-05; DEMO-03 | Baseline, outage, observation, restoration, and cleanup are captured | TODO |
-| RUN-08 | P0 | Implement deterministic evaluator | RUN-07 | Result is one of passed, failed, partial, inconclusive | TODO |
-| RUN-09 | P0 | Persist local evidence and digest | RUN-08 | Run can be listed/opened without sensitive payloads | TODO |
-| RUN-10 | P0 | Implement replay and compare | RUN-09 | Replay validates preconditions; incompatible runs are rejected | TODO |
+| RUN-07 | P0 | Implement rpc-blackout scenario | RUN-01; RUN-05; DEMO-03 | Baseline, outage, observation, restoration, and cleanup are captured | DONE |
+| RUN-08 | P0 | Implement deterministic evaluator | RUN-07 | Result is one of passed, failed, partial, inconclusive | DONE |
+| RUN-09 | P0 | Persist local evidence and digest | RUN-08 | Run can be listed/opened without sensitive payloads | DONE |
+| RUN-10 | P0 | Implement replay and compare | RUN-09 | Replay validates preconditions; incompatible runs are rejected | DONE |
 
 ## CLI
 

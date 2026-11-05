@@ -173,6 +173,12 @@ this phase.
 9. Add JSON and Markdown reports.
 10. Verify reproducibility from documented commands.
 
+Phase 10 foundation status: versioned evidence normalization, deterministic
+baseline/fault/recovery evaluation, metrics, local JSON persistence, replay
+configuration, and compatible-run comparison are implemented. CLI commands,
+report formatting, and end-to-end application observations remain for Phase 11;
+this phase does not claim CLI orchestration.
+
 **Exit gate:** The CLI can run, replay, compare, and report a truthful local scenario.
 
 ## Phase 11 — First-class CLI
