@@ -60,3 +60,31 @@ Environment files are skipped. Environment-variable references are reported by
 variable name only, and URL references are reduced to their origin. Sensitive
 configuration values are never copied into findings. Multiple lockfiles are
 reported as a conflict rather than silently selecting one package manager.
+
+## Runner lifecycle and safety
+
+`@blocklab/runner` owns one `ExecutionContext` per execution. The context
+centrally validates these transitions:
+
+```text
+created -> preparing -> running -> completed
+                         |       -> failed
+                         |       -> cancelling -> cancelled
+                         |                    -> timed_out
+```
+
+The context records lifecycle timestamps and structured events, owns an
+`AbortSignal`, and registers cleanup handlers for resources created by that
+execution. Cleanup runs in reverse registration order, is idempotent, continues
+after individual failures, and reports all cleanup failures separately from the
+primary execution error.
+
+`preflightExecution` validates timeout/resource limits, rejects sensitive
+configuration, and enforces loopback-only targets. An authorization interface is
+defined for future staging support, but authorized staging execution remains
+disabled rather than simulated.
+
+This phase does not create an RPC proxy, intercept requests, inject failures,
+launch imported project scripts, or manage Anvil/Docker. Cancellation signals
+cooperative tasks; an arbitrary uncooperative asynchronous task cannot be
+forcibly terminated by this library.

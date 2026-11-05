@@ -135,7 +135,9 @@
 9. Persist redacted local evidence.
 10. Test success, timeout, cancellation, and cleanup failure.
 
-**Exit gate:** A no-op scenario completes through every lifecycle stage independently of UI.
+**Exit gate:** Lifecycle state, cancellation, timeout, cleanup, and safety
+contracts are verified independently of UI. A no-op scenario orchestration
+through every experiment phase remains part of the later runner/proxy work.
 
 ## Phase 09 — RPC proxy and rpc-blackout
 
