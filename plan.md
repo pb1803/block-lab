@@ -289,6 +289,18 @@ local-agent boundary, but the comparison panel stays read-only.
 
 **Exit gate:** A real write/query/retrieve flow succeeds, or Arkiv is excluded without mock claims. **Not met cleanly:** the POC is verified live read-only, the write path is verified only up to a rejected wallet signature (mock wallet), and the real write is blocked by infrastructure (faucet + no funds + exhausted anonymous budget). Arkiv stays out of Studio until a real run exists; the write is not excluded, because the only missing pieces are external (testnet funds/access key).
 
+**Phase 14B status (2026-11-05):** unblocking. A dedicated signer
+(`0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A`) is prepared in the git-ignored
+`apps/arkiv-poc/.env.local`; the write harness is now idempotent
+(`poc-write-001`, live duplicate preflight shared with the browser gateway,
+bounded transport, post-failure re-check instead of blind re-signing) and was
+run against the real chain — it correctly reported `0 tGLM` and exited code 2
+without signing. The official faucet (wallet session + captcha, 24 h cooldown)
+and access-key flow (wallet sign-in + captcha) were verified from the Hub UI
+and the docs; both are human steps. A real write/query/retrieve completes once
+the faucet funds the signer and the access key is set; no mock claim stands in
+for it.
+
 ## Phase 15 — Arkiv experiment history
 
 1. Define the compact experiment-definition schema.

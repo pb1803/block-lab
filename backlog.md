@@ -137,7 +137,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 |---|---|---|---|---|---|
 | ARK-01 | P1 | Add Arkiv POC fixture | CLI-09 | `@arkiv-network/sdk@1.0.1` and Viem are used with Rabdi | DONE |
 | ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | DONE |
-| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | BLOCKED |
+| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | BLOCKED (awaiting faucet) |
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
 | ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL |
 | ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | NOT-VERIFIED |
@@ -150,7 +150,15 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 
 - **ARK-01 DONE**: `@arkiv-network/sdk@1.0.1` + viem `2.57.16` in `apps/arkiv-poc` only; package and live Rabdi facts verified (`0x76edaf`, 2 s blocks).
 - **ARK-02 DONE**: no private key in source; signing is wallet-side EIP-1193; access key optional and git-ignored.
-- **ARK-03 BLOCKED**: `try-write` and the browser publish path are read to the signature request only. Real write did not happen: signer balance `0 tGLM`, faucet requires a connected browser wallet, anonymous `arkiv_query` budget exhausted (HTTP 429 `ANON_COST_LIMITED`). Nothing signed; no tx hash/entity key.
+- **ARK-03 BLOCKED (awaiting faucet)**: the harness is ready and idempotent
+  (`poc-write-001`, live duplicate preflight shared with the gateway, post-failure
+  re-check, no blind retry) and was run against the real chain (blocked at
+  `0 tGLM`, exit 2, nothing signed). Prepared signer:
+  `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` (key in git-ignored
+  `apps/arkiv-poc/.env.local`). The official faucet needs a browser wallet
+  session + captcha (24 h cooldown) — a human step. Anonymous `arkiv_query`
+  budget intermittently 429s (`ANON_COST_LIMITED`); an access key removes it.
+  No tx hash/entity key exists; nothing is claimed.
 - **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. An indexed `blocklab.experiment` record was not written.
 - **ARK-05 PARTIAL**: `owner == creator` observed on public `posts` entities; no two-wallet experiment.
 - **ARK-06 NOT-VERIFIED**: SDK expiry semantics read only; no live expired-record observation.

@@ -9,8 +9,94 @@ browser wallet, the harness signer holds `0 tGLM`, and nothing was signed. The
 browser write path was therefore verified only up to the wallet's signature
 request, with a deliberately mock wallet that rejects it.
 
+**Phase 14B** (2026-11-05) prepared the environment for the first real
+publication and hardened the harness so it can never blind-retry: a dedicated
+testnet signer is now configured locally (git-ignored), the write harness
+runs a live duplicate preflight before signing and a post-failure re-check
+instead of re-signing, and the official faucet/access-key flows were verified.
+The remaining step is human: fund the prepared signer through the official
+faucet. **No real transaction has been signed, and no transaction hash or
+entity key exists.** `try-write.mjs` exits with code `2` (blocked) rather than
+fabricating a result.
+
 Nothing in this document claims a write, a transaction hash, an entity key, an
 ownership experiment or an expiry experiment that did not happen.
+
+## Unblocking the first real publication (Phase 14B)
+
+### Prepared signer
+
+A dedicated Rabdi testnet account was generated locally
+(`apps/arkiv-poc/.env.local`, which is git-ignored; the key value is never
+printed, committed, logged or shown):
+
+| Item | Value |
+|---|---|
+| Signer address | `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` |
+| Balance (verified live, 2026-11-05) | `0 tGLM` |
+| Where the key lives | `apps/arkiv-poc/.env.local` (`ARKIV_PRIVATE_KEY`, git-ignored) |
+
+### Faucet (funding) — verified, human step
+
+Verified from the official [Testnet Faucet](https://hub.arkiv.network/faucet)
+UI bundle and `docs.arkiv.network/networks/rabdi/`:
+
+* URL: `https://hub.arkiv.network/faucet` (only documented Rabdi faucet).
+* The claim request is `POST /api/faucet` with `{ recipient, captchaToken }`
+  and requires an authenticated Hub session; `GET /api/faucet` without a
+  session returns `401 {"error":"Unauthorized"}`. So a claim needs the browser
+  page: connect a wallet (sign-in message), enter the recipient address, solve
+  the captcha, submit. The claim itself is an on-chain transaction
+  (`txHash`), the amount is `amountGlm` tGLM, and the cooldown label defaults
+  to **24 hours** ("one claim per wallet, per cooldown window").
+* **To run:** open the URL in a browser, connect the wallet, set the recipient
+  to the signer address above, solve the captcha, claim. Expected result: a
+  claim transaction appears on Rabdi and
+  `eth_getBalance(0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A)` becomes
+  non-zero.
+
+No faucet API keyed only by an address exists; no bypass was attempted.
+
+### Access key — verified, human step (recommended)
+
+Verified from [docs.arkiv.network/start-here/access-keys/](
+https://docs.arkiv.network/start-here/access-keys/):
+
+* URL: `https://hub.arkiv.network/access-keys`.
+* Steps: connect a wallet and sign the sign-in message (a signature, not a
+  transaction), finish Hub registration, select the network **Rabdi**, name the
+  project, solve the captcha, generate. One key per wallet per network, with a
+  monthly quota measured in cost units.
+* The key is accepted in the RPC path, as an `X-API-KEY` header, or as a bearer
+  token; `rabdi({ accessKey })` puts it in the URL for `http()`/`webSocket()`.
+* **Expected result:** the public RPC stops answering `424/429`-style budget
+  errors and the POC preflight can always run.
+* Where it goes locally, without being printed: `apps/arkiv-poc/.env.local`
+  (`ARKIV_ACCESS_KEY` for the harness, `VITE_ARKIV_ACCESS_KEY` for the browser
+  build).
+
+### After funding: exact verification command
+
+```bash
+pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/try-write.mjs
+```
+
+The harness checks chain id `7794095`, runs the duplicate preflight for
+`poc-write-001`, reads the signer balance, and only then signs **one**
+`createEntity`. It prints the transaction hash, entity key, expiry block, and
+an explorer link, reads the entity back, and compares the on-chain fields
+(experimentId, experimentType, scenarioName, status, targetChainId, startedAtMs)
+against the submitted record.
+
+### Why re-runs are safe
+
+The harness uses the stable experiment id `poc-write-001`. A re-run first
+checks `arkiv_query` for that id; if the entity exists it prints the existing
+entity and exits without signing. If a write errors after an uncertain result,
+the harness re-checks for the entity instead of re-signing, and any later run
+is protected by the same preflight. The duplicate-check query lives in
+`apps/arkiv-poc/src/repository.ts`, shared with the browser gateway, and is
+covered by unit tests.
 
 ## Scope and boundary
 
@@ -170,24 +256,49 @@ rejects. This verifies the client state machine, not a chain interaction. Becaus
 the anonymous `arkiv_query` budget was exhausted, the mode-3 duplicate preflight
 is stubbed with an empty result set over CDP; every write-side call is real.
 
+### Harness preflight run (Phase 14B, 2026-11-05)
+
+`node --env-file=.env.local scripts/try-write.mjs`, with the prepared signer and
+no funds (real live chain, no mocking):
+
+```text
+access key: none (public, rate-limited endpoint)
+chain id: 7794095
+preflight: no entity with experimentId "poc-write-001"
+signer: 0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A (from .env.local, value not printed)
+balance: 0 wei (0 tGLM)
+BLOCKED: the signer has no tGLM on Rabdi, so no transaction can be paid for.
+Fund 0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A at
+https://hub.arkiv.network/faucet (Rabdi, tGLM). Nothing was signed and no
+entity was written.
+exit=2
+```
+
+This is a genuine read of Rabdi (chain id, `arkiv_query`, `eth_getBalance`)
+followed by a refusal to sign, not a mocked test.
+
 ### Unit tests
 
 * `packages/arkiv-metadata`: 41 tests (schema, strict validation, canonical
   payload + digest).
-* `apps/arkiv-poc`: 41 tests (status machine, workflow against a mock gateway,
-  gateway mapping/decoding, wallet error classification, bounded probe timeout).
-* Whole repository: 243 tests in 24 files; `pnpm lint`, `pnpm typecheck`,
-  `pnpm build` clean.
+* `apps/arkiv-poc`: status machine, workflow against a mock gateway, gateway
+  mapping/decoding, wallet error classification, bounded probe timeout, and the
+  shared duplicate-preflight query (`repository.test.ts`, including the rule that
+  a throttled check throws instead of returning "no duplicate").
+* Whole repository: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`
+  clean (counts in the Phase 14B report).
 
 ## Blockers (honest state)
 
-1. **No real entity write.** `apps/arkiv-poc/scripts/try-write.mjs` refuses to
-   fabricate a result: it reads the signer's balance first. The fresh signer
-   `0x34940e918A82738459C5471b88B45267D184fd1C` holds `0 tGLM`, so the harness
-   exited with code 2 and a message instead of signing. The faucet at
-   `hub.arkiv.network/faucet` requires a connected browser wallet and a cooldown,
-   so it is not scriptable. Consequence: there is no real transaction hash, no
-   real entity key and no explorer link yet.
+1. **No real entity write — awaiting one human faucet claim.** The harness and
+   the POC are ready, but the prepared signer
+   `0x9Ff86Ef02CC6857e7F6942f58Ec78B8380ADe74A` still holds `0 tGLM`.
+   The official faucet requires a browser wallet session, a captcha and a
+   cooldown (default 24 hours), so it cannot be completed from this
+   environment; no bypass was attempted. Consequence: there is no real
+   transaction hash, no real entity key and no explorer link yet. Once the
+   faucet claim lands, one command completes and verifies the publication
+   (see above).
 2. **Anonymous query budget exhausted.** Without an access key the public
    endpoint answers `arkiv_query` with HTTP 429 and
    `{"error":"ANON_COST_LIMITED","message":"unauthenticated query budget exhausted;
@@ -215,6 +326,9 @@ node scripts/arkiv-net-check.mjs             # live read-only check
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/?selftest=1 --mode self-test
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/ --mode wallet-mismatch
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/ --mode wallet-reject
+
+# real publication (needs a funded signer in .env.local; safe to re-run)
+pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/try-write.mjs
 ```
 
 `apps/arkiv-poc/.env.example` documents `VITE_ARKIV_ACCESS_KEY`. Writes also need

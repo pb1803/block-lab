@@ -16,7 +16,6 @@ import {
   ExpirationTime,
 } from "@arkiv-network/sdk";
 import { rabdi } from "@arkiv-network/sdk/chains";
-import { eq } from "@arkiv-network/sdk/query";
 import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import type { Address, Hex } from "viem";
 import { custom, hexToBytes, http } from "viem";
@@ -25,6 +24,7 @@ import {
   experimentSchema,
   experimentValues,
 } from "./entity/experiment-schema.js";
+import { findExistingExperimentKey } from "./repository.js";
 import type { ArchivedRecord } from "./status.js";
 import type { Eip1193Provider } from "./wallet.js";
 
@@ -72,16 +72,12 @@ export function createRabdiGateway(options: RabdiGatewayOptions): ArkivGateway {
 
   return {
     async findExperiment(experimentId) {
-      const page = await publicClient
-        .select({ $key: true })
-        .from(experimentSchema)
-        .where(eq("experimentId", experimentId))
-        .limit(5)
-        .fetch();
-      const entity = page.entities[0];
-      if (entity === undefined || entity.$key === undefined)
-        return { entityKey: null };
-      return { entityKey: entity.$key };
+      const entityKey = await findExistingExperimentKey(
+        publicClient,
+        experimentSchema,
+        experimentId,
+      );
+      return { entityKey };
     },
 
     async publishExperiment(metadata) {
