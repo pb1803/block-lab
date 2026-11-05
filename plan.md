@@ -276,18 +276,18 @@ local-agent boundary, but the comparison panel stays read-only.
 
 ## Phase 14 — Arkiv POC
 
-1. Use `@arkiv-network/sdk@1.0.1` with Viem.
-2. Configure Rabdi testnet and a documented access key.
-3. Use a dedicated testnet signer without source-code secrets.
-4. Write one compact experiment entity.
-5. Query it by indexed attributes.
-6. Retrieve its payload and system metadata.
-7. Verify ownership and creator behavior from live results.
-8. Verify expiry behavior.
-9. Record transaction and explorer evidence.
-10. Decide the smallest user-facing history feature.
+1. Use `@arkiv-network/sdk@1.0.1` with Viem. (**done, verified 1.0.1 / viem 2.57.16**)
+2. Configure Rabdi testnet and a documented access key. (**done** — chain id `7794095`/`0x76edaf` verified live; access key via `VITE_ARKIV_ACCESS_KEY`, git-ignored; `""` = public rate-limited endpoint.)
+3. Use a dedicated testnet signer without source-code secrets. (**done** — signing stays in the browser wallet via EIP-1193; `try-write.mjs` uses an env-provided key only, and refuses to sign without a balance.)
+4. Write one compact experiment entity. (**partially blocked** — code complete (`createEntity` after a duplicate preflight and a checkbox), but no real write: zero tGLM, faucet needs a browser wallet, anonymous `arkiv_query` budget exhausted. Nothing was signed.)
+5. Query it by indexed attributes. (**verified read-only** — schema-tagged `arkiv_query` returns live `posts` entities; the `blocklab.experiment` schema and sample record validate.)
+6. Retrieve its payload and system metadata. (**verified on public entities** — `getEntity` returns key + owner/creator/expiresAt; strict payload decode covered by tests.)
+7. Verify ownership and creator behavior from live results. (**partial** — observed as `owner == creator` on public `posts`; no two-wallet experiment, so no claim made.)
+8. Verify expiry behavior. (**not experimentally verified** — SDK semantics read (`fromDays`, max cap, `max(expiresAt, currentBlock + minLifetime)`); needs a real write + wait.)
+9. Record transaction and explorer evidence. (**not done** — requires the blocked write.)
+10. Decide the smallest user-facing history feature. (**deferred to Phase 15**; Studio integration stays gated on a real write/query/retrieve run.)
 
-**Exit gate:** A real write/query/retrieve flow succeeds, or Arkiv is excluded without mock claims.
+**Exit gate:** A real write/query/retrieve flow succeeds, or Arkiv is excluded without mock claims. **Not met cleanly:** the POC is verified live read-only, the write path is verified only up to a rejected wallet signature (mock wallet), and the real write is blocked by infrastructure (faucet + no funds + exhausted anonymous budget). Arkiv stays out of Studio until a real run exists; the write is not excluded, because the only missing pieces are external (testnet funds/access key).
 
 ## Phase 15 — Arkiv experiment history
 

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLOCKLAB — Arkiv Rabdi POC</title>
+  </head>
+  <body>
+    <main class="poc">
+      <h1>BLOCKLAB — Arkiv Rabdi proof of concept</h1>
+      <p id="scope" class="scope"></p>
+
+      <section class="card" id="wallet-card">
+        <h2>1 · Wallet</h2>
+        <p id="wallet-status" class="status" data-status="missing"></p>
+        <button id="connect" type="button" data-action="connect">Connect wallet</button>
+        <button id="disconnect" type="button" data-action="disconnect" hidden>Disconnect</button>
+      </section>
+
+      <section class="card" id="network-card">
+        <h2>2 · Rabdi network</h2>
+        <p id="network-status" class="status"></p>
+        <button id="switch-network" type="button" data-action="switch" hidden>
+          Switch the wallet to Rabdi (0x76edaf)
+        </button>
+      </section>
+
+      <section class="card" id="record-card">
+        <h2>3 · Metadata to publish</h2>
+        <p class="hint">
+          A sample experiment record built from the validated <code>blocklab.experiment</code>
+          contract (schema <code>1.0</code>). This POC does not read a live run.
+        </p>
+        <table class="record-table">
+          <caption>Record review (allowlisted fields)</caption>
+          <tbody id="record-rows"></tbody>
+        </table>
+        <label class="field">
+          Requested lifetime
+          <select id="expiry-days" data-control="expiry">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30" selected>30 days</option>
+          </select>
+        </label>
+        <label class="field checkbox">
+          <input id="confirm-public" type="checkbox" data-control="confirm" />
+          I understand this writes a public, queryable record to the Rabdi testnet.
+        </label>
+        <button id="publish" type="button" data-action="publish" disabled>Publish record to Arkiv</button>
+        <p id="publish-status" class="status" aria-live="polite"></p>
+        <p id="error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section class="card" id="result-card" hidden>
+        <h2>4 · Result</h2>
+        <dl>
+          <dt>Entity key</dt>
+          <dd><code id="entity-key" data-field="entityKey"></code> <button id="query" type="button" data-action="query">Query it back</button></dd>
+          <dt>Transaction hash</dt>
+          <dd><code id="tx-hash" data-field="txHash"></code></dd>
+          <dt>Expires at block</dt>
+          <dd><code id="expiry-block" data-field="expiresAtBlock"></code></dd>
+          <dt>Already existed?</dt>
+          <dd id="already-published" data-field="alreadyPublished"></dd>
+        </dl>
+        <p id="query-status" class="status" aria-live="polite"></p>
+        <pre id="record-json" class="record-json" hidden></pre>
+      </section>
+
+      <section class="card" id="probe-card" hidden>
+        <h2>Live read-only probe</h2>
+        <pre id="probe-json" class="record-json"></pre>
+      </section>
+
+      <footer class="foot">
+        <p>
+          Never uploads: private keys, wallet identifiers as payload content, raw RPC params,
+          credentials, cookies, tokens, or detailed traces. Publish is user-triggered and
+          wallet-approved; nothing is submitted without an explicit click and wallet signature.
+        </p>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

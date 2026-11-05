@@ -8,6 +8,7 @@
     { "path": "./packages/evidence" },
     { "path": "./packages/rpc-probe" },
     { "path": "./packages/browser-rpc" },
+    { "path": "./packages/arkiv-metadata" },
     { "path": "./apps/cli" },
     { "path": "./apps/studio" },
     { "path": "./apps/sample-dapp" }

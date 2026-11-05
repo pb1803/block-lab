@@ -19,7 +19,7 @@ BLOCKLAB is planned as a TypeScript/JavaScript pnpm workspace monorepo with a sh
 ## Planned integrations
 
 - Ethereum Foundation Anon-RPC — browser integration implemented (see below)
-- Arkiv — planned
+- Arkiv — Rabdi testnet proof of concept built; a real entity write is still blocked (see below)
 - ENSv2 is conditional and will be included only if its real, central workflow is validated within the project timeline.
 
 ## Project status
@@ -28,9 +28,11 @@ The local inspector, loopback RPC proxy, deterministic `rpc-blackout`
 experiment, evidence evaluator, replay/comparison APIs, and first-class CLI are
 implemented. The Anon-RPC browser integration is implemented in
 `@blocklab/browser-rpc` and used by `apps/sample-dapp` and `apps/anon-rpc-poc`.
-Studio, Arkiv, ENSv2, automatic failover, and hosted services remain out of scope
-for the current local workflow. Anon-RPC is browser-only: the CLI never imports
-or emulates the harness.
+The Arkiv proof of concept lives in `apps/arkiv-poc` and is verified read-only on
+the Rabdi testnet; its real entity write is still blocked, and no write is
+claimed. ENSv2, automatic failover, and hosted services remain out of scope for
+the current local workflow. Anon-RPC is browser-only: the CLI never imports or
+emulates the harness.
 
 ## Anon-RPC browser routes
 
@@ -98,6 +100,41 @@ direct request. These numbers measure routing and cost, **not** anonymity:
 classification is the adopter list's claim, and BLOCKLAB does not measure exit
 IPs, observer views, or traffic analysis. Details and limitations:
 [docs/anon-rpc-poc.md](docs/anon-rpc-poc.md).
+
+## Arkiv Rabdi proof of concept
+
+`apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It
+uses the verified `@arkiv-network/sdk@1.0.1` and `viem` against the Rabdi testnet
+(chain id `7794095` = `0x76edaf`, 2 s blocks, `tGLM`), and writes one compact
+`blocklab.experiment` entity through a connected EIP-1193 wallet. The record
+contract lives in `@blocklab/arkiv-metadata` (dependency-free): a schema-versioned
+allowlist with six indexed discovery attributes and one non-indexed payload
+attribute. Detailed evidence stays local.
+
+Publishing is gated: valid record, connected wallet, chain id exactly `0x76edaf`,
+an explicit confirmation checkbox, and a completed duplicate preflight. A wrong
+network disables publish instead of switching silently, a rejected signature
+leaves nothing behind, and signing never leaves the wallet.
+
+What is verified:
+
+- Read-only JSON-RPC check (`scripts/arkiv-net-check.mjs`): 11/11 live checks —
+  chain id, head block, 2 s block timing, schema-tagged query (8 `posts`
+  entities), owner/creator/expiresAt fields, `getEntity` hit and miss, no
+  transaction sent.
+- Browser POC check (`scripts/arkiv-poc-check.mjs`): a live read-only probe
+  (chain `7794095`, block `265399`, tag `blocklab.experiment`) with publish
+  disabled and zero writes; wrong-network gating with a mock wallet; and the
+  user-rejection path up to exactly one rejected `eth_sendTransaction`, leaving no
+  entity key and no transaction hash.
+
+What is **not** claimed: no real entity write, transaction hash, entity key or
+explorer link exists yet. The testnet faucet needs a connected browser wallet, the
+harness signer holds `0 tGLM`, and the anonymous `arkiv_query` budget on the public
+endpoint is exhausted (HTTP 429 `ANON_COST_LIMITED`), so an access key is required
+for repeated live reads. Ownership/creator and expiry behaviour are therefore not
+verified experimentally. Full evidence and blockers:
+[docs/arkiv-poc.md](docs/arkiv-poc.md).
 
 ## Package manager
 

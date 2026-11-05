@@ -31,6 +31,22 @@ importers:
         specifier: ^7.0.0
         version: 7.3.7(@types/node@24.19.2)
 
+  apps/arkiv-poc:
+    dependencies:
+      '@arkiv-network/sdk':
+        specifier: 1.0.1
+        version: 1.0.1(typescript@5.9.3)(viem@2.57.16(typescript@5.9.3))
+      '@blocklab/arkiv-metadata':
+        specifier: workspace:*
+        version: link:../../packages/arkiv-metadata
+      viem:
+        specifier: 2.57.16
+        version: 2.57.16(typescript@5.9.3)
+    devDependencies:
+      vite:
+        specifier: ^7.0.0
+        version: 7.3.7(@types/node@24.19.2)
+
   apps/cli:
     dependencies:
       '@blocklab/core':
@@ -73,6 +89,8 @@ importers:
       '@blocklab/core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  packages/arkiv-metadata: {}
 
   packages/browser-rpc:
     dependencies:
@@ -125,6 +143,16 @@ packages:
 
   '@anon-rpc/harness-core@0.4.0':
     resolution: {integrity: sha512-ZFVeE0tkUgXPw1qu99s8JPKD4jFatHZ+nELisZ4WF+YMpCrBFIvpJe0qdCoLcmbhH1brbsC35qe8F1G3HxIbgA==}
+
+  '@arkiv-network/sdk@1.0.1':
+    resolution: {integrity: sha512-DCOFdGunn4I5nYrvIV/YIkMCkLZM7EQNSyNPtqpmQkP2JzTEfRLBJleBSB2rokWMa833/9P8DMiwsEXACr3CUQ==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      typescript: '>=5.0.0'
+      viem: ^2.0.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   '@biomejs/biome@2.6.5':
     resolution: {integrity: sha512-n0sp74QbSVEkWXlH659TKv4oJNylwAvDeZ8K8vt/PbcF1xneuNWe57z/G0Bxfh00cufhWXF6DiStLM8+jcLUpg==}
@@ -850,6 +878,12 @@ snapshots:
   '@anon-rpc/harness-core@0.4.0':
     dependencies:
       '@noble/hashes': 1.8.0
+
+  '@arkiv-network/sdk@1.0.1(typescript@5.9.3)(viem@2.57.16(typescript@5.9.3))':
+    dependencies:
+      viem: 2.57.16(typescript@5.9.3)
+    optionalDependencies:
+      typescript: 5.9.3
 
   '@biomejs/biome@2.6.5':
     optionalDependencies:

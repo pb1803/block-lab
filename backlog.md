@@ -135,16 +135,27 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| ARK-01 | P1 | Add Arkiv POC fixture | CLI-09 | `@arkiv-network/sdk@1.0.1` and Viem are used with Rabdi | TODO |
-| ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | TODO |
-| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | TODO |
-| ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | TODO |
-| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | TODO |
-| ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | TODO |
-| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | TODO |
+| ARK-01 | P1 | Add Arkiv POC fixture | CLI-09 | `@arkiv-network/sdk@1.0.1` and Viem are used with Rabdi | DONE |
+| ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | DONE |
+| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | BLOCKED |
+| ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
+| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL |
+| ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | NOT-VERIFIED |
+| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL |
 | ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | TODO |
 | ARK-09 | P1 | Implement validated local replay | ARK-08; CLI-05 | Retrieved definitions are validated before local execution | TODO |
 | ARK-10 | P1 | Complete evidence documentation | ARK-09 | Schema, friction, reach, rationale, and usage docs contain real evidence | TODO |
+
+Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
+
+- **ARK-01 DONE**: `@arkiv-network/sdk@1.0.1` + viem `2.57.16` in `apps/arkiv-poc` only; package and live Rabdi facts verified (`0x76edaf`, 2 s blocks).
+- **ARK-02 DONE**: no private key in source; signing is wallet-side EIP-1193; access key optional and git-ignored.
+- **ARK-03 BLOCKED**: `try-write` and the browser publish path are read to the signature request only. Real write did not happen: signer balance `0 tGLM`, faucet requires a connected browser wallet, anonymous `arkiv_query` budget exhausted (HTTP 429 `ANON_COST_LIMITED`). Nothing signed; no tx hash/entity key.
+- **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. An indexed `blocklab.experiment` record was not written.
+- **ARK-05 PARTIAL**: `owner == creator` observed on public `posts` entities; no two-wallet experiment.
+- **ARK-06 NOT-VERIFIED**: SDK expiry semantics read only; no live expired-record observation.
+- **ARK-07 PARTIAL**: user-signs-without-pasting-key is proven up to the rejection; a real Studio write waits for ARK-03.
+- **SUB-03 stays open**: no claim of a working write/query/retrieve integration is made until ARK-03 clears.
 
 ## ENSv2 conditional
 

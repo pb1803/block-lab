@@ -10,6 +10,8 @@
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
 - `apps/studio` is a browser-safe shell plus one read-only comparison panel. It renders payloads the host page already produced, never executes RPC requests, never polls, and does not anonymize anything. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
 - `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. It also exposes an optional Viem adapter (`@blocklab/browser-rpc/viem`, Viem as an optional peer dependency) that delegates every request to those transports. Nothing in the Node.js dependency graph imports it.
+- `@blocklab/arkiv-metadata` is the platform-neutral Arkiv record contract: schema version, allowlisted experiment metadata, strict validation, and canonical payload bytes plus digest. It has no dependencies and no I/O, so the CLI, the runner and the browser POC can all import it.
+- `apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It is the only workspace that imports `@arkiv-network/sdk`, uses a connected EIP-1193 wallet for signing, and writes one compact `blocklab.experiment` entity on the Rabdi testnet. The CLI, runner, core and Studio do not depend on it.
 
 ## Dependency direction
 
@@ -19,15 +21,17 @@ core
 ├── scenarios
 ├── runner ──> scenarios
 ├── evidence
+├── arkiv-metadata (dependency-free record contract)
 ├── browser-rpc ──(lazy, browser only)──> @anon-rpc/browser-harness
 │   └── /viem subpath ──(optional peer)──> viem
 ├── apps/cli ──> inspector, scenarios, runner, evidence
 ├── apps/sample-dapp ──> browser-rpc
 ├── apps/anon-rpc-poc ──> browser-rpc
 ├── apps/studio ──> core, browser-rpc
+├── apps/arkiv-poc ──> arkiv-metadata, @arkiv-network/sdk, viem
 ```
 
-The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv will be added later behind an integration interface, after a real proof of concept.
+The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv follows the same isolation rule: the SDK lives only in `apps/arkiv-poc`, and Studio integration waits until a real write/query/retrieve run exists (see [arkiv-poc.md](arkiv-poc.md)).
 
 ### Studio comparison view
 
@@ -67,6 +71,30 @@ cancels the download in Chrome.
 package: it exposes explicit initialize/run/close buttons and a worker selector,
 and it has no ordinary-RPC fallback. `apps/sample-dapp` adds route selection and
 the comparison workflow on top of the same transports.
+
+### Arkiv proof of concept
+
+`apps/arkiv-poc` is deliberately outside the runner and the CLI. It composes:
+
+- `config.ts` — verified Rabdi constants (chain id `7794095`/`0x76edaf`, RPC host,
+  2 s blocks, `tGLM`, explorer) and the optional access key from
+  `VITE_ARKIV_ACCESS_KEY`.
+- `entity/experiment-schema.ts` — `defineSchema("blocklab.experiment")` with six
+  indexed discovery columns and one non-indexed `payload` byte attribute.
+- `status.ts` — typed wallet/publish state machine; `reduce` refuses out-of-order
+  confirmations and every publish path is gated by an explicit checklist.
+- `wallet.ts` — EIP-1193 helpers, error classification (`4001` is a user
+  rejection, not a network failure) and an explicit network switch with a
+  `4902` add-chain fallback only.
+- `gateway.ts` — `ArkivGateway` over `createPublicClient`/`walletClient`:
+  duplicate preflight by `experimentId`, write, read-back, strict payload decode.
+- `workflow.ts` — orchestrates preflight → signature → confirmation → read-back
+  with a generation counter so stale async results cannot mutate newer state.
+
+The record itself lives in `@blocklab/arkiv-metadata`, which the CLI and runner
+can import without pulling in the SDK. Detailed evidence stays local; only the
+validated record is written. No part of the POC is wired into Studio, and Phase
+15 stays gated on a real testnet write/query/retrieve.
 
 ## Experiment data flow
 
