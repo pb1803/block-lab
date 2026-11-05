@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/inspector" },
+    { "path": "./packages/scenarios" },
+    { "path": "./packages/runner" },
+    { "path": "./packages/evidence" },
+    { "path": "./packages/rpc-probe" },
+    { "path": "./apps/cli" },
+    { "path": "./apps/studio" },
+    { "path": "./apps/sample-dapp" }
+  ]
+}

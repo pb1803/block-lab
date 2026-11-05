@@ -28,27 +28,27 @@
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| ARC-01 | P0 | Create pnpm workspace | GOV-06 | Workspace install and package discovery work | TODO |
-| ARC-02 | P0 | Define shared domain models | ARC-01 | Project, dependency, scenario, experiment, result, and status types compile | TODO |
-| ARC-03 | P0 | Define runner and adapter boundaries | ARC-02 | Node and browser execution responsibilities are explicit | TODO |
-| ARC-04 | P0 | Define evidence and redaction schema | ARC-02 | Required metrics and digest inputs are typed; sensitive fields are excluded | TODO |
-| ARC-05 | P0 | Define local Studio agent boundary | ARC-03 | Browser has no arbitrary filesystem/process access | TODO |
-| TOOL-01 | P0 | Configure strict TypeScript | ARC-01 | Typecheck passes in a clean workspace | TODO |
-| TOOL-02 | P0 | Configure lint, format, test, and build scripts | ARC-01 | All focused scripts run successfully | TODO |
+| ARC-01 | P0 | Create pnpm workspace | GOV-06 | Workspace install and package discovery work | DONE |
+| ARC-02 | P0 | Define shared domain models | ARC-01 | Project, dependency, scenario, experiment, result, and status types compile | DONE |
+| ARC-03 | P0 | Define runner and adapter boundaries | ARC-02 | Node and browser execution responsibilities are explicit | DONE |
+| ARC-04 | P0 | Define evidence and redaction schema | ARC-02 | Required metrics and digest inputs are typed; sensitive fields are excluded | DONE |
+| ARC-05 | P0 | Define local Studio agent boundary | ARC-03 | Browser has no arbitrary filesystem/process access | DONE |
+| TOOL-01 | P0 | Configure strict TypeScript | ARC-01 | Typecheck passes in a clean workspace | DONE |
+| TOOL-02 | P0 | Configure lint, format, test, and build scripts | ARC-01 | All focused scripts run successfully | DONE |
 | TOOL-03 | P1 | Add CI checks | TOOL-01; TOOL-02 | CI runs install, lint, typecheck, test, and build | TODO |
-| ARC-06 | P1 | Document architecture/data flow | ARC-02; ARC-03 | Documentation matches implemented boundaries | TODO |
+| ARC-06 | P1 | Document architecture/data flow | ARC-02; ARC-03 | Documentation matches implemented boundaries | DONE |
 
 ## Safe inspector
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| INS-01 | P0 | Detect package managers and manifests | ARC-02 | npm, pnpm, yarn, and bun lockfiles are identified | TODO |
-| INS-02 | P0 | Detect React, Next.js, and Vite | INS-01 | Framework evidence and limitations are reported | TODO |
-| INS-03 | P0 | Detect Wagmi, Viem, and Ethers | INS-01 | Dependencies and relevant references are reported | TODO |
-| INS-04 | P0 | Detect Foundry and Hardhat | INS-01 | Config/source evidence is reported; Hardhat is not assumed executable | TODO |
-| INS-05 | P0 | Parse safe chain/RPC configuration | INS-01 | Non-secret values are reported and secret values are redacted | TODO |
-| INS-06 | P0 | Build evidence-labelled dependency graph | INS-02; INS-03; INS-04 | Nodes and edges include source and confidence | TODO |
-| INS-07 | P0 | Add stable JSON inspection output | INS-06 | CLI JSON output has a documented stable shape | TODO |
+| INS-01 | P0 | Detect package managers and manifests | ARC-02 | npm, pnpm, yarn, and bun lockfiles are identified | DONE |
+| INS-02 | P0 | Detect React, Next.js, and Vite | INS-01 | Framework evidence and limitations are reported | DONE |
+| INS-03 | P0 | Detect Wagmi, Viem, and Ethers | INS-01 | Dependencies and relevant references are reported | DONE |
+| INS-04 | P0 | Detect Foundry and Hardhat | INS-01 | Config/source evidence is reported; Hardhat is not assumed executable | DONE |
+| INS-05 | P0 | Parse safe chain/RPC configuration | INS-01 | Non-secret values are reported and secret values are redacted | DONE |
+| INS-06 | P0 | Build evidence-labelled dependency graph | INS-02; INS-03; INS-04 | Nodes and edges include source and confidence | DONE |
+| INS-07 | P0 | Add stable JSON inspection output | INS-06 | CLI JSON output has a documented stable shape | DONE |
 | INS-08 | P1 | Add safe GitHub source inspection | INS-06 | Public source is inspected without arbitrary script execution | TODO |
 | INS-09 | P2 | Add external observation mode | INS-06 | Reports contain only externally observable claims | TODO |
 
@@ -56,10 +56,10 @@
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| DEMO-01 | P0 | Create minimal TypeScript sample dApp | TOOL-01 | Sample starts with documented commands | TODO |
-| DEMO-02 | P0 | Add configurable read-only RPC | DEMO-01 | Endpoint can point to the local proxy | TODO |
-| DEMO-03 | P0 | Add baseline health/read probe | DEMO-02 | Baseline success and latency are measurable | TODO |
-| DEMO-04 | P0 | Add Anvil local environment | DEMO-02 | Local chain starts/stops predictably or Docker fallback is documented | TODO |
+| DEMO-01 | P0 | Create minimal TypeScript sample dApp | TOOL-01 | Sample starts with documented commands | DONE |
+| DEMO-02 | P0 | Add configurable read-only RPC | DEMO-01 | Endpoint can point to the local proxy | DONE |
+| DEMO-03 | P0 | Add baseline health/read probe | DEMO-02 | Baseline success and latency are measurable | DONE |
+| DEMO-04 | P0 | Add Anvil local environment | DEMO-02 | Local chain starts/stops predictably or Docker fallback is documented | DONE |
 | DEMO-05 | P0 | Add controlled sample startup/cleanup | DEMO-04 | Processes are owned and removed after all outcomes | TODO |
 
 ## Runner, proxy, and rpc-blackout
@@ -82,7 +82,7 @@
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |
 |---|---|---|---|---|---|
 | CLI-01 | P0 | Implement `blocklab init` | ARC-02 | Config is created without overwriting user files | TODO |
-| CLI-02 | P0 | Implement `blocklab inspect` | INS-07 | Human and JSON output are available | TODO |
+| CLI-02 | P0 | Implement `blocklab inspect` | INS-07 | Human and JSON output are available | DONE |
 | CLI-03 | P0 | Implement `blocklab scenarios` | RUN-07 | Lists scenario, preconditions, and safety scope | TODO |
 | CLI-04 | P0 | Implement `blocklab test rpc-blackout` | RUN-10 | Runs the local experiment end to end | TODO |
 | CLI-05 | P0 | Implement `blocklab replay` | CLI-04 | Replays a stored experiment after validation | TODO |

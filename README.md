@@ -32,4 +32,37 @@ BLOCKLAB is under development. The repository currently contains project require
 
 ## Package manager
 
-pnpm is the chosen package manager. The full pnpm workspace and package manifests will be added in a later implementation phase.
+pnpm is the chosen package manager and is configured as the repository workspace manager.
+
+## Development
+
+Requirements:
+
+- Node.js 24+
+- pnpm 10+
+
+Install dependencies and run the foundation checks:
+
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+The repository is a pnpm workspace. The initial implementation contains shared domain and boundary packages plus a minimal CLI and Studio shell. Anon-RPC, Arkiv, ENSv2, and the RPC blackout runner are not implemented yet.
+
+Inspect a local project without executing its scripts:
+
+```bash
+pnpm --filter @blocklab/cli build
+node apps/cli/dist/index.js inspect path/to/project
+node apps/cli/dist/index.js inspect path/to/project --json
+```
+
+Inspection output is evidence-labelled and redacts environment values, credentials,
+tokens, and private-key material.
+
+The Phase 07 sample dApp and local Anvil instructions are documented in
+[docs/sample-dapp.md](docs/sample-dapp.md).
