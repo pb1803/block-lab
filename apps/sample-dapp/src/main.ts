@@ -15,7 +15,9 @@ import {
   renderObservations,
   renderRouteDetail,
   renderStatus,
+  renderViemProbe,
 } from "./render.js";
+import { runViemProbe } from "./viem-demo.js";
 import "./style.css";
 
 function requireElement<T extends Element>(selector: string): T {
@@ -27,6 +29,7 @@ function requireElement<T extends Element>(selector: string): T {
 const runButton = requireElement<HTMLButtonElement>("#run");
 const compareButton = requireElement<HTMLButtonElement>("#compare");
 const closeButton = requireElement<HTMLButtonElement>("#close");
+const viemButton = requireElement<HTMLButtonElement>("#run-viem");
 const routeInputs = Array.from(
   document.querySelectorAll<HTMLInputElement>('input[name="route"]'),
 );
@@ -55,6 +58,7 @@ function setBusy(busy: boolean): void {
   const usable = configResult.ok;
   runButton.disabled = busy || !usable;
   compareButton.disabled = busy || !usable;
+  viemButton.disabled = busy || !usable;
   closeButton.disabled =
     busy || !usable || activeRoute !== "anon-rpc" || anon?.state !== "ready";
 }
@@ -208,8 +212,39 @@ for (const input of routeInputs) {
   });
 }
 
+async function runViem(): Promise<void> {
+  const transport: RpcTransport | undefined =
+    activeRoute === "anon-rpc" ? anon : direct;
+  if (transport === undefined) {
+    renderStatus("The selected route is not configured.", "error");
+    return;
+  }
+  setBusy(true);
+  if (activeRoute === "anon-rpc" && transport.state !== "ready") {
+    const ready = await initializeAnon();
+    if (!ready) {
+      setBusy(false);
+      return;
+    }
+  }
+  renderStatus(`Running the Viem public client via ${activeRoute}…`, "info");
+  const probe = await runViemProbe(transport);
+  renderViemProbe(probe);
+  renderStatus(
+    probe.ok
+      ? `Viem client completed four calls via ${activeRoute}.`
+      : `Viem client failed on ${activeRoute}: ${probe.errorMessage ?? "unknown error"}`,
+    probe.ok ? "success" : "error",
+  );
+  setBusy(false);
+}
+
 runButton.addEventListener("click", () => {
   void runActiveWorkload();
+});
+
+viemButton.addEventListener("click", () => {
+  void runViem();
 });
 
 compareButton.addEventListener("click", () => {

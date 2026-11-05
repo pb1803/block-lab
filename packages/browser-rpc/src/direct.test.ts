@@ -157,6 +157,16 @@ describe("DirectRpcTransport", () => {
     }
   });
 
+  it("keeps a closed transport closed when initialize is retried", async () => {
+    const transport = new DirectRpcTransport({ endpoint });
+    transport.close();
+
+    await expect(transport.initialize()).rejects.toMatchObject({
+      category: "not-ready",
+    });
+    expect(transport.state).toBe("closed");
+  });
+
   it("refuses wallet methods at runtime, not only at compile time", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ result: "0x1" }));
     const transport = new DirectRpcTransport({ endpoint, fetchImpl });

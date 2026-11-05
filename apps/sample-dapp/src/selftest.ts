@@ -8,6 +8,7 @@ import {
   summarizeRoute,
   type WorkerDescriptor,
 } from "@blocklab/browser-rpc";
+import { runViemProbe, type ViemProbe } from "./viem-demo.js";
 
 export interface SelfTestResult {
   readonly schemaVersion: "1.0";
@@ -20,6 +21,10 @@ export interface SelfTestResult {
   };
   readonly direct: RouteWorkload;
   readonly anonRpc: RouteWorkload | null;
+  readonly viem: {
+    readonly direct: ViemProbe;
+    readonly anonRpc: ViemProbe | null;
+  };
   readonly comparison: RouteComparison;
   readonly ok: boolean;
 }
@@ -53,6 +58,8 @@ export async function runSelfTest(
     observations: directObservations,
     initialized: true,
   });
+  // Viem public-client path over the same transport instance, before it closes.
+  const directViem = await runViemProbe(direct);
   direct.close();
 
   const anon = new AnonRpcTransport({
@@ -81,6 +88,7 @@ export async function runSelfTest(
     initialized,
     ...(initializationError === undefined ? {} : { initializationError }),
   });
+  const anonViem = initialized ? await runViemProbe(anon) : null;
   const anonState = anon.state;
   anon.close();
 
@@ -102,12 +110,15 @@ export async function runSelfTest(
     },
     direct: directSummary,
     anonRpc: { ...anonSummary, state: anonState },
+    viem: { direct: directViem, anonRpc: anonViem },
     comparison,
     ok:
       directSummary.successRatePct === 100 &&
       initialized &&
       anonSummary.successRatePct === 100 &&
-      anonSummary.failed === 0,
+      anonSummary.failed === 0 &&
+      directViem.ok &&
+      anonViem?.ok === true,
   };
 
   scope.__blocklabSelfTest = result;

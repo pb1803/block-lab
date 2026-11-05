@@ -2,11 +2,14 @@ import { callJsonRpc } from "./request.js";
 import {
   assertReadOnlyMethod,
   BrowserRpcError,
+  paramsForMethod,
   type ReadOnlyMethod,
   type RequestOptions,
   type RpcObservation,
   type RpcTransport,
+  redactMessage,
   type TransportState,
+  validateRequestParams,
 } from "./types.js";
 
 export interface DirectRpcOptions {
@@ -63,6 +66,10 @@ export class DirectRpcTransport implements RpcTransport {
     return this.#state;
   }
 
+  public get timeoutMs(): number {
+    return this.#timeoutMs;
+  }
+
   public get initializationError(): string | undefined {
     return this.#initializationError;
   }
@@ -76,10 +83,10 @@ export class DirectRpcTransport implements RpcTransport {
       );
     }
     if (this.#state === "closed") {
-      this.#state = "failed";
-      this.#initializationError = "Transport is closed.";
+      // Closed is terminal: a closed route must never resurrect itself.
+      this.#initializationError = "Direct transport is closed.";
       return Promise.reject(
-        new BrowserRpcError("initialization", this.#initializationError),
+        new BrowserRpcError("not-ready", this.#initializationError),
       );
     }
     this.#state = "ready";
@@ -109,10 +116,34 @@ export class DirectRpcTransport implements RpcTransport {
       };
     }
 
+    let params: readonly unknown[];
+    try {
+      params =
+        options?.params === undefined
+          ? paramsForMethod(readOnlyMethod)
+          : validateRequestParams(readOnlyMethod, options.params);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Invalid request parameters.";
+      return {
+        route: this.route,
+        method: readOnlyMethod,
+        startedAt,
+        endedAt: startedAt,
+        durationMs: 0,
+        success: false,
+        errorCategory: "invalid-params",
+        errorMessage: redactMessage(message),
+        harnessReady: false,
+        receivedThroughHarness: false,
+      };
+    }
+
     const outcome = await callJsonRpc({
       fetchFn: this.#fetch,
       endpoint: this.#endpoint,
       method: readOnlyMethod,
+      params,
       timeoutMs: this.#timeoutMs,
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
     });
@@ -139,5 +170,43 @@ export class DirectRpcTransport implements RpcTransport {
 
   public close(): void {
     this.#state = "closed";
+  }
+
+  public async requestResult(
+    method: ReadOnlyMethod,
+    options?: RequestOptions,
+  ): Promise<unknown> {
+    const readOnlyMethod = assertReadOnlyMethod(method);
+    if (this.#state !== "ready") {
+      throw new BrowserRpcError(
+        "not-ready",
+        `Direct transport is ${this.#state}.`,
+      );
+    }
+    const params =
+      options?.params === undefined
+        ? paramsForMethod(readOnlyMethod)
+        : validateRequestParams(readOnlyMethod, options.params);
+    const outcome = await callJsonRpc({
+      fetchFn: this.#fetch,
+      endpoint: this.#endpoint,
+      method: readOnlyMethod,
+      params,
+      timeoutMs: this.#timeoutMs,
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
+    });
+    if (!outcome.success) {
+      throw new BrowserRpcError(
+        outcome.errorCategory ?? "connection",
+        outcome.errorMessage ?? "RPC request failed.",
+      );
+    }
+    if (outcome.rawResult === undefined) {
+      throw new BrowserRpcError(
+        "json",
+        "RPC endpoint returned no JSON-RPC result.",
+      );
+    }
+    return outcome.rawResult;
   }
 }

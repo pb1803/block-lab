@@ -8,7 +8,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@blocklab/browser-rpc": "workspace:*"
+    "@blocklab/browser-rpc": "workspace:*",
+    "viem": "2.57.16"
   },
   "devDependencies": {
     "vite": "^7.0.0"

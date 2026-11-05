@@ -2,12 +2,14 @@ import { callJsonRpc } from "./request.js";
 import {
   assertReadOnlyMethod,
   BrowserRpcError,
+  paramsForMethod,
   type ReadOnlyMethod,
   type RequestOptions,
   type RpcObservation,
   type RpcTransport,
   redactMessage,
   type TransportState,
+  validateRequestParams,
   type WorkerDescriptor,
   type WorkerKind,
 } from "./types.js";
@@ -153,6 +155,10 @@ export class AnonRpcTransport implements RpcTransport {
     return this.#state;
   }
 
+  public get timeoutMs(): number {
+    return this.#requestTimeoutMs;
+  }
+
   public get initializationError(): string | undefined {
     return this.#initializationError;
   }
@@ -172,6 +178,15 @@ export class AnonRpcTransport implements RpcTransport {
 
   public initialize(signal?: AbortSignal): Promise<void> {
     if (this.#state === "ready") return Promise.resolve();
+    if (this.#state === "closed") {
+      // Closed is terminal: a closed route must never resurrect a worker.
+      return Promise.reject(
+        new BrowserRpcError(
+          "not-ready",
+          "Anon-RPC transport is closed; create a new transport to restart routing.",
+        ),
+      );
+    }
     if (this.#state === "initializing" && this.#initPromise !== undefined) {
       return this.#initPromise;
     }
@@ -365,10 +380,36 @@ export class AnonRpcTransport implements RpcTransport {
       };
     }
 
+    let params: readonly unknown[];
+    try {
+      params =
+        options?.params === undefined
+          ? paramsForMethod(readOnlyMethod)
+          : validateRequestParams(readOnlyMethod, options.params);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Invalid request parameters.";
+      return {
+        route: this.route,
+        workerId: this.#workerDescriptor.id,
+        workerKind: this.#workerDescriptor.kind,
+        method: readOnlyMethod,
+        startedAt,
+        endedAt: startedAt,
+        durationMs: 0,
+        success: false,
+        errorCategory: "invalid-params",
+        errorMessage: redactMessage(message),
+        harnessReady: false,
+        receivedThroughHarness: false,
+      };
+    }
+
     const outcome = await callJsonRpc({
       fetchFn: worker.fetch as typeof fetch,
       endpoint: this.#endpoint,
       method: readOnlyMethod,
+      params,
       timeoutMs: this.#requestTimeoutMs,
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
     });
@@ -406,6 +447,50 @@ export class AnonRpcTransport implements RpcTransport {
     this.#disposeWorker();
     this.#state = "closed";
     this.#initPromise = undefined;
+  }
+
+  public async requestResult(
+    method: ReadOnlyMethod,
+    options?: RequestOptions,
+  ): Promise<unknown> {
+    const readOnlyMethod = assertReadOnlyMethod(method);
+    const worker = this.#worker;
+    if (this.#state !== "ready" || worker === undefined) {
+      throw new BrowserRpcError(
+        "not-ready",
+        this.#initializationError ??
+          `Anon-RPC transport is ${this.#state}; no direct fallback is performed.`,
+      );
+    }
+    const params =
+      options?.params === undefined
+        ? paramsForMethod(readOnlyMethod)
+        : validateRequestParams(readOnlyMethod, options.params);
+    const outcome = await callJsonRpc({
+      fetchFn: worker.fetch as typeof fetch,
+      endpoint: this.#endpoint,
+      method: readOnlyMethod,
+      params,
+      timeoutMs: this.#requestTimeoutMs,
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
+    });
+    if (!outcome.success) {
+      // A thrown `TypeError` through `worker.fetch` is a worker failure; nothing
+      // was attempted outside the sandbox, and no direct fallback occurs.
+      throw new BrowserRpcError(
+        outcome.errorCategory === "connection"
+          ? "worker"
+          : (outcome.errorCategory ?? "worker"),
+        outcome.errorMessage ?? "Anon-RPC request failed.",
+      );
+    }
+    if (outcome.rawResult === undefined) {
+      throw new BrowserRpcError(
+        "json",
+        "Anon-RPC worker returned no JSON-RPC result.",
+      );
+    }
+    return outcome.rawResult;
   }
 
   #disposeWorker(): void {

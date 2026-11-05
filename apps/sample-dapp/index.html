@@ -59,6 +59,22 @@
         <p id="privacy-note" class="note"></p>
       </section>
 
+      <section class="panel" aria-labelledby="viem-heading">
+        <h2 id="viem-heading">Viem public client</h2>
+        <p class="meta">
+          The selected route exposed through Viem's
+          <code>createPublicClient</code> transport adapter —
+          <code>getChainId</code>, <code>getBlockNumber</code>,
+          <code>getBalance</code>, and one read-only <code>call</code>.
+        </p>
+        <div class="actions">
+          <button id="run-viem" type="button" disabled>Run Viem client</button>
+        </div>
+        <div id="viem-results">
+          <p class="meta">No Viem requests have been made yet.</p>
+        </div>
+      </section>
+
       <pre id="selftest-output" hidden></pre>
     </main>
     <script type="module" src="/src/main.ts"></script>

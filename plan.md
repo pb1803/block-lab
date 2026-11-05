@@ -209,7 +209,10 @@ unimplemented.
 3. Verify readiness, fetch, error, logging, and close behavior.
 4. Connect an existing read-only bootstrap provider.
 5. Test eligible read methods.
-6. Implement the exact Viem transport adapter.
+6. Implement the exact Viem transport adapter. *(Done in the ANON-03 follow-up:
+`@blocklab/browser-rpc/viem` wraps both routes with Viem 2.57.16
+`createTransport`, verified in a real browser on the `passthrough` and `tor-js`
+workers.)*
 7. Test a real anonymizing worker from official adopter data.
 8. Compare direct and Anon-RPC workloads.
 9. Record coverage, success rate, latency, and exclusions without raw payloads.
@@ -253,8 +256,8 @@ and no direct fallback. `nym` and `nox` were not successfully exercised, and no
 anonymity property is claimed or measured. The CLI states that the harness is
 browser-only and never simulates it.
 
-Not delivered in this phase: the Viem transport adapter (`ANON-03`) and the
-Studio comparison view (`ANON-08`).
+ANON-03 (Viem adapter) was completed afterwards as a separate change; the Studio
+comparison view (`ANON-08`) is still open.
 
 **Exit gate:** The supported browser demo routes eligible reads through Anon-RPC by default, or the feature is dropped.
 

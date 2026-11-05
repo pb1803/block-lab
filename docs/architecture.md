@@ -9,7 +9,7 @@
 - `@blocklab/evidence` owns redacted local result persistence, evaluation, digesting, and report formatting.
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
 - `apps/studio` is currently a browser-safe shell. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
-- `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. Nothing in the Node.js dependency graph imports it.
+- `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. It also exposes an optional Viem adapter (`@blocklab/browser-rpc/viem`, Viem as an optional peer dependency) that delegates every request to those transports. Nothing in the Node.js dependency graph imports it.
 
 ## Dependency direction
 
@@ -20,6 +20,7 @@ core
 ├── runner ──> scenarios
 ├── evidence
 ├── browser-rpc ──(lazy, browser only)──> @anon-rpc/browser-harness
+│   └── /viem subpath ──(optional peer)──> viem
 ├── apps/cli ──> inspector, scenarios, runner, evidence
 ├── apps/sample-dapp ──> browser-rpc
 ├── apps/anon-rpc-poc ──> browser-rpc
@@ -194,6 +195,36 @@ WebSocket client, opens `?selftest=1`, and prints the payload, so the browser pa
 is verifiable without a manual click-through and without a browser-automation
 dependency. `apps/sample-dapp/src/selftest.ts` publishes only that payload on
 `window.__blocklabSelfTest`.
+
+### Viem adapter
+
+`@blocklab/browser-rpc/viem` turns a route into a Viem transport built with
+Viem's `createTransport`, so applications can use the normal public client:
+
+```ts
+const route = createAnonViemRoute({ endpoint, bootstrapRpcUrl, worker });
+const client = createPublicClient({ chain: mainnet, transport: route.transport });
+```
+
+Boundaries:
+
+- No RPC execution is duplicated: the adapter calls
+  `instance.requestResult(method, { params })`, which is the same engine used by
+  `request()` and therefore keeps the allowlist, classification, timeouts, and
+  no-fallback guarantee.
+- Initialization stays where it already was: lazy, memoized by the transport,
+  and shared by every client built from the same route. There is no global
+  singleton, and `route.close()` is the only disposal path.
+- Viem wraps unknown thrown values in `UnknownRpcError`, so the adapter throws
+  `BlocklabRpcError extends viem.BaseError` with the BLOCKLAB `category` and the
+  original error as `cause`.
+- Viem-level retries default to `0`, and the Viem timeout is set above the
+  transport timeout so BLOCKLAB's classification wins.
+- Caller-supplied parameters are validated (`eth_getBalance` address + block
+  tag, `eth_call` call object + block tag). State overrides and unknown call
+  fields are refused. Parameters are never stored in observations.
+- The `viem` peer dependency is optional, so importing the main entry point does
+  not require Viem.
 
 Measured results and their limits are recorded in
 [docs/anon-rpc-poc.md](anon-rpc-poc.md).

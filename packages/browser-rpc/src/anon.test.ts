@@ -195,6 +195,19 @@ describe("AnonRpcTransport lifecycle", () => {
     expect(observation.errorCategory).toBe("not-ready");
   });
 
+  it("never resurrects a worker after close", async () => {
+    const worker = createWorker();
+    const { transport, factory } = makeTransport(worker);
+    await transport.initialize();
+    transport.close();
+
+    await expect(transport.initialize()).rejects.toMatchObject({
+      category: "not-ready",
+    });
+    expect(factory).toHaveBeenCalledOnce();
+    expect(transport.state).toBe("closed");
+  });
+
   it("stays closed when closed during initialization", async () => {
     let rejectReady: (error: unknown) => void = () => {};
     const ready = new Promise<void>((_resolve, reject) => {

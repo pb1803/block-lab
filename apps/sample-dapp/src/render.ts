@@ -3,6 +3,7 @@ import type {
   RouteWorkload,
   RpcObservation,
 } from "@blocklab/browser-rpc";
+import type { ViemProbe } from "./viem-demo.js";
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -27,6 +28,7 @@ const resultsElement = requireElement<HTMLDivElement>("#results");
 const comparisonElement = requireElement<HTMLDivElement>("#comparison");
 const privacyNoteElement =
   requireElement<HTMLParagraphElement>("#privacy-note");
+const viemResultsElement = requireElement<HTMLDivElement>("#viem-results");
 
 export function renderStatus(
   message: string,
@@ -174,4 +176,36 @@ export function renderInitialComparisonPlaceholder(): void {
       text: "Run a comparison to measure both routes with the same workload.",
     }),
   );
+}
+
+export function renderViemProbe(probe: ViemProbe): void {
+  const card = element("article", { className: "card" });
+  card.append(
+    element("h3", { text: `Viem via ${probe.route}` }),
+    element("p", {
+      className: probe.ok ? "meta" : "meta error",
+      text: probe.ok
+        ? "Public client calls answered through the selected transport."
+        : `Failed (${probe.errorCategory ?? "error"}): ${probe.errorMessage ?? "unknown error"}`,
+    }),
+  );
+
+  if (probe.ok) {
+    const list = element("dl", { className: "facts" });
+    const rows: Array<[string, string]> = [
+      ["getChainId", probe.chainId === undefined ? "—" : String(probe.chainId)],
+      ["getBlockNumber", probe.blockNumber ?? "—"],
+      ["getBalance (wei)", probe.balanceWei ?? "—"],
+      ["call().data", probe.callData ?? "—"],
+    ];
+    for (const [term, value] of rows) {
+      list.append(
+        element("dt", { text: term }),
+        element("dd", { text: value }),
+      );
+    }
+    card.append(list);
+  }
+
+  viemResultsElement.replaceChildren(card);
 }

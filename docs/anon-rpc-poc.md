@@ -98,6 +98,53 @@ Guarantees:
   an upstream failure.
 - Worker log entries are counted, never retained or displayed.
 
+## Viem adapter
+
+`@blocklab/browser-rpc/viem` exposes the same routes through Viem's standard
+public client. Viem 2.x is an optional peer dependency; the main package entry
+does not import it.
+
+```ts
+import { createPublicClient } from "viem";
+import { mainnet } from "viem/chains";
+import { createAnonViemRoute } from "@blocklab/browser-rpc/viem";
+
+const route = createAnonViemRoute({
+  endpoint: "https://ethereum-rpc.publicnode.com",
+  bootstrapRpcUrl: "https://ethereum-rpc.publicnode.com",
+  worker: findWorker("passthrough")!,
+});
+const client = createPublicClient({ chain: mainnet, transport: route.transport });
+
+await client.getChainId();
+await client.getBlockNumber();
+await client.getBalance({ address });
+await client.call({ to: contract, data: "0x18160ddd" });
+
+route.close(); // owned worker
+```
+
+Design points:
+
+- The adapter contains no RPC logic. It calls `requestResult`, which shares the
+  engine, allowlist, timeout handling, and error classification with the
+  observation path.
+- Initialization stays lazy and memoized in the transport, so multiple clients
+  built from one route share a single worker; separate routes never share one.
+- `route.close()` is terminal. Viem clients have no disposal hook, so a client
+  built from a closed route rejects with `not-ready` instead of silently
+  re-initializing or falling back.
+- Viem wraps unknown thrown values, so the adapter throws
+  `BlocklabRpcError extends viem.BaseError` carrying `category` and the original
+  `BrowserRpcError` as `cause`.
+- Viem retries default to `0`; the Viem timeout is set above the transport
+  timeout so the specific category wins.
+- Caller parameters are validated: `eth_getBalance` takes
+  `[address, blockTag?]`, `eth_call` takes `[callObject, blockTag?]`, call fields
+  are allowlisted, and state overrides are refused. Parameters are never stored.
+- Viem actions outside the four allowlisted methods fail with
+  `unsupported-method`.
+
 ## Running the sample dApp
 
 ```powershell
@@ -121,6 +168,10 @@ user action, never an automatic fallback. **Compare routes** runs the same
 four-method workload on both routes and renders success rate, average latency,
 harness-routed count, coverage, and the privacy limitations. The serializable
 payload is also exposed as `window.__blocklabComparison` for future Studio use.
+
+The page also has a **Viem public client** section that runs
+`getChainId`, `getBlockNumber`, `getBalance`, and one read-only contract `call`
+through the selected route using `createPublicClient`.
 
 The worker's readiness timeout defaults to 60 s because initialization includes
 an on-chain read plus a bundle download (the `nym` bundle is ~18 MB and Tor
@@ -150,6 +201,23 @@ Environment: Windows, HeadlessChrome/156.0.0.0, endpoint
 | A | `passthrough` (reference) | 4/4, avg 364.5 ms | 4/4, avg 941.0 ms | 4/4 | 100% |
 | B | `tor-js` (network) | 4/4, avg 375.8 ms | 4/4, avg 2995.8 ms | 4/4 | 100% |
 | C | `nox` with a mainnet bootstrap (deliberate mismatch) | 4/4, avg 400 ms | 0/4, init failed | 0/4 | 0% |
+
+### Viem adapter runs (2026-11-05)
+
+Same page, same endpoint, `?selftest=1`; each run adds the Viem public-client
+probe on both routes (chain ID, block number, zero-address balance, empty
+`eth_call`).
+
+| run | worker | direct workload | anon workload | Viem direct | Viem anon |
+|---|---|---|---|---|---|
+| D | `passthrough` (reference) | 4/4, avg 247.8 ms | 4/4, avg 1015.5 ms | ok, block 26350471 | ok, block 26350471 |
+| E | `tor-js` (network) | 4/4, avg 241.3 ms | 4/4, avg 1594.5 ms | ok, block 26350473 | ok, block 26350477 |
+| F | `nox` with a mainnet bootstrap | 4/4 | 0/4, init failed | ok | not run (worker not ready) |
+
+In run E the direct and Anon-RPC Viem probes returned different block numbers,
+which is expected because each route issued its own real requests. Run F shows
+that a failed worker leaves the Direct route usable while the Anon-RPC Viem probe
+is skipped, with no fallback and no uncaught page error.
 
 Run B per-method latency: `eth_chainId` 3632 ms, `eth_blockNumber` 1484 ms,
 `eth_getBalance` 1920 ms, `eth_call` 4947 ms.
@@ -194,9 +262,13 @@ measurement and must never be read as a privacy signal.
 
 ## Known limitations
 
-- No Viem transport adapter yet (backlog `ANON-03`). The sample uses the shared
-  JSON-RPC path directly.
 - No Studio view for the comparison payload yet (`ANON-08`).
+- The Viem adapter supports the four allowlisted methods only; Viem actions that
+  need other methods (for example `estimateGas`, `getTransactionReceipt`, or
+  `multicall`) fail with `unsupported-method`.
+- Viem's request function carries no abort signal, so a cancelled Viem call
+  cannot cancel the in-flight request; BLOCKLAB's timeout and `close()` still
+  bound it.
 - `nym` and `nox` were not exercised successfully; only `passthrough` and
   `tor-js` produced verified routed reads. `nox` was only used to verify the
   failure path.

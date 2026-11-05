@@ -28,10 +28,12 @@ worker. Environment files are ignored by Git. Do not put credentials in the
 endpoint or commit local configuration. Run `pnpm build` first so
 `@blocklab/browser-rpc` exists as built output.
 
-The page exposes three actions: **Run requests** on the selected route,
+The page exposes four actions: **Run requests** on the selected route,
 **Compare routes** (same workload on both routes, then coverage, success rate,
-average latency, harness-routed count, and the privacy limits), and **Close
-worker**. The comparison payload is also available as
+average latency, harness-routed count, and the privacy limits), **Run Viem
+client** (the same route through Viem's `createPublicClient`, calling
+`getChainId`, `getBlockNumber`, `getBalance`, and one read-only contract
+`call`), and **Close worker**. The comparison payload is also available as
 `window.__blocklabComparison`.
 
 The local experiment flow is:

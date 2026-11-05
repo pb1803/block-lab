@@ -11,6 +11,7 @@ export interface JsonRpcCallOptions {
   readonly fetchFn: typeof fetch;
   readonly endpoint: string;
   readonly method: ReadOnlyMethod;
+  readonly params?: readonly unknown[];
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
 }
@@ -20,6 +21,8 @@ export interface JsonRpcOutcome {
   readonly errorCategory?: RpcErrorCategory;
   readonly errorMessage?: string;
   readonly value?: string;
+  /** Untruncated result for adapters; never copied into observations. */
+  readonly rawResult?: unknown;
 }
 
 interface JsonRpcBody {
@@ -105,7 +108,7 @@ export async function callJsonRpc(
         jsonrpc: "2.0",
         id: DEFAULT_REQUEST_ID,
         method: options.method,
-        params: paramsForMethod(options.method),
+        params: options.params ?? paramsForMethod(options.method),
       }),
       signal: controller.signal,
     });
@@ -126,7 +129,9 @@ export async function callJsonRpc(
     }
 
     const value = previewValue(body.result);
-    return value === undefined ? { success: true } : { success: true, value };
+    return value === undefined
+      ? { success: true, rawResult: body.result }
+      : { success: true, value, rawResult: body.result };
   } catch (error) {
     return classifyThrown(error, timedOut, cancelled);
   } finally {

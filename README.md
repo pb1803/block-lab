@@ -52,6 +52,20 @@ runs the same workload on both routes and reports method, route, timestamps,
 latency, success/failure, error category, worker readiness, harness-routed
 count, coverage, and the privacy limits of the measurement.
 
+Existing Viem applications can use the same routes through
+`@blocklab/browser-rpc/viem`:
+
+```ts
+const route = createAnonViemRoute({ endpoint, bootstrapRpcUrl, worker });
+const client = createPublicClient({ chain: mainnet, transport: route.transport });
+await client.getBalance({ address });
+route.close();
+```
+
+Viem is an optional peer dependency, the adapter reuses the existing
+transports, and `route.close()` is the only disposal path. Details:
+[packages/browser-rpc/README.md](packages/browser-rpc/README.md).
+
 Headless-browser verification (no browser-automation dependency):
 
 ```bash

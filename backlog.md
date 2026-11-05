@@ -97,7 +97,7 @@
 |---|---|---|---|---|---|
 | ANON-01 | P1 | Add browser POC fixture | CLI-09 | `@anon-rpc/browser-harness@0.4.0` is used only in a browser | DONE |
 | ANON-02 | P1 | Verify worker lifecycle and errors | ANON-01 | Ready, fetch, close, and failure paths are observed | DONE |
-| ANON-03 | P1 | Verify Viem adapter | ANON-02 | Exact type-safe adapter is proven by a working read | TODO |
+| ANON-03 | P1 | Verify Viem adapter | ANON-02 | Exact type-safe adapter is proven by a working read | DONE |
 | ANON-04 | P1 | Verify real anonymizing worker | ANON-03 | Official worker performs an eligible read successfully | DONE |
 | ANON-05 | P1 | Measure direct versus Anon-RPC | ANON-04 | Coverage, success rate, latency, and exclusions are recorded | DONE |
 | ANON-06 | P1 | Route eligible demo reads by default | ANON-05 | Browser demo default path uses Anon-RPC for supported reads | DONE |
@@ -106,8 +106,12 @@
 | ANON-09 | P1 | Add end-to-end sponsor evidence | ANON-06 | Evidence proves actual default routing and app behavior | DONE |
 | ANON-10 | P2 | Keep CLI boundary explicit | ANON-01 | CLI reports browser-only limitation and never simulates the harness | DONE |
 
-ANON-04 was verified without the Viem adapter (the shared JSON-RPC path was used),
-so ANON-03 stays open on its own merits. Verified on 2026-11-05 in headless
+ANON-03 is delivered as the `@blocklab/browser-rpc/viem` entry point (Viem
+2.57.16, optional peer dependency). It reuses the existing transports, keeps the
+read-only allowlist and no-fallback guarantee, and was verified with a real Viem
+public client in headless Chrome on both the `passthrough` and `tor-js` workers
+(`getChainId`, `getBlockNumber`, `getBalance`, and `eth_call`). ANON-04 was
+originally verified without an adapter. Verified on 2026-11-05 in headless
 Chrome 156: `tor-js` (network worker, mainnet specifier) routed 4/4 eligible
 reads; `passthrough` (reference worker) routed 4/4 and is not anonymizing; a
 deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
