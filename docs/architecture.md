@@ -51,6 +51,18 @@ transport measurement only; `passthrough` is labelled as a non-anonymizing
 reference worker, and routing is never presented as anonymity. There is no
 Studio-side RPC engine, so the panel cannot diverge from the measured data.
 
+The optional export (`apps/studio/src/comparison/export.ts`, artifact kind
+`blocklab.rpc-comparison`, schema `1.0`) is built from that validated model, not
+from the raw page payload, so it is a whitelist rather than a filter. It records
+a deterministic run identifier, an explicit completeness label with reasons, and
+the redacted measurement data; it never carries raw RPC parameters, headers,
+accounts, storage, worker internals, endpoint URLs, or unredacted error text. A
+payload Studio could not render is rejected, and a run with no recorded attempt
+is rejected instead of exported as an empty success. Partial and failed runs are
+exportable only with their label intact. `download.ts` is the sole browser
+delivery module and defers object-URL revocation, because revoking synchronously
+cancels the download in Chrome.
+
 `apps/anon-rpc-poc` is a thin browser-only Vite application over the shared
 package: it exposes explicit initialize/run/close buttons and a worker selector,
 and it has no ordinary-RPC fallback. `apps/sample-dapp` adds route selection and

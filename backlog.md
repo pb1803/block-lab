@@ -103,7 +103,8 @@
 | ANON-06 | P1 | Route eligible demo reads by default | ANON-05 | Browser demo default path uses Anon-RPC for supported reads | DONE |
 | ANON-07 | P1 | Add privacy comparison reporting | ANON-06 | Measured facts and documented limitations are separated | DONE |
 | ANON-08 | P1 | Add Studio Anon-RPC view | ANON-07 | UI displays route coverage and comparison without anonymity overclaims | DONE |
-| ANON-09 | P1 | Add end-to-end sponsor evidence | ANON-06 | Evidence proves actual default routing and app behavior | DONE |
+| ANON-09 | P1 | Export redacted RPC comparison snapshot | ANON-08 | A valid comparison downloads as a versioned, redacted JSON artifact with an explicit completeness label | DONE |
+| ANON-11 | P1 | Add end-to-end sponsor evidence | ANON-06 | Evidence proves actual default routing and app behavior | DONE |
 | ANON-10 | P2 | Keep CLI boundary explicit | ANON-01 | CLI reports browser-only limitation and never simulates the harness | DONE |
 
 ANON-03 is delivered as the `@blocklab/browser-rpc/viem` entry point (Viem
@@ -116,7 +117,14 @@ publishes a `StudioRpcSnapshot`, Studio validates it, recomputes coverage from t
 attempts, keeps skipped methods distinct from successes, reports Viem results
 separately, and renders fixed privacy limitations. Verified in headless Chrome on
 2026-11-05 for passthrough, `tor-js`, and a failing `nox` worker, plus empty,
-live-refresh, and malformed-payload paths. ANON-04 was
+live-refresh, and malformed-payload paths. ANON-09 adds the export: Studio builds
+a `blocklab.rpc-comparison` schema `1.0` artifact from the validated model (never
+from the raw payload), with a stable `runId`, an explicit
+`complete`/`incomplete`/`failed` label and reasons, redacted error text, and no
+raw parameters, headers, accounts, storage, or endpoint URLs. Download delivery
+changed during verification: revoking the object URL synchronously aborted the
+file in Chrome, so revocation is now deferred. The earlier sponsor-evidence item
+was renumbered to ANON-11 to keep ANON-09 for this export work. ANON-04 was
 originally verified without an adapter. Verified on 2026-11-05 in headless
 Chrome 156: `tor-js` (network worker, mainnet specifier) routed 4/4 eligible
 reads; `passthrough` (reference worker) routed 4/4 and is not anonymizing; a
@@ -169,7 +177,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 |---|---|---|---|---|---|
 | SUB-01 | P0 | Complete README and setup | CLI-09; UI-05 | Fresh user reproduces the core demo | TODO |
 | SUB-02 | P0 | Add license and AI disclosure | SUB-01 | Repository disclosures are accurate | TODO |
-| SUB-03 | P0 | Verify sponsor claims | ANON-09; ARK-10 | Only working integrations are claimed | TODO |
+| SUB-03 | P0 | Verify sponsor claims | ANON-11; ARK-10 | Only working integrations are claimed | TODO |
 | SUB-04 | P0 | Run clean-clone verification | SUB-01; SAFE-03 | Install, tests, and demo work from clean checkout | TODO |
 | SUB-05 | P0 | Record demo evidence | SUB-03; SUB-04 | Video/script shows real CLI, Studio, and selected integrations | TODO |
 | SUB-06 | P0 | Submit before deadline | SUB-05 | Submission confirmation and final commit reference saved | TODO |

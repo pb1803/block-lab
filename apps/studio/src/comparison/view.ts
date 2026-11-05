@@ -24,6 +24,16 @@ export interface ViewText {
   readonly text: string;
 }
 
+export interface ComparisonViewOptions {
+  /** False when no download capability or no handler is available. */
+  readonly exportEnabled?: boolean;
+  /** Result of the most recent export attempt, if any. */
+  readonly exportFeedback?: {
+    readonly message: string;
+    readonly error: boolean;
+  } | null;
+}
+
 export type ViewNode = ViewElement | ViewText;
 
 function el(
@@ -40,6 +50,48 @@ function txt(value: string): ViewText {
 
 function paragraph(className: string, value: string): ViewElement {
   return el("p", { class: className }, txt(value));
+}
+
+function exportBar(
+  options: ComparisonViewOptions,
+  ready: boolean,
+): ViewElement {
+  const enabled = ready && options.exportEnabled === true;
+  const button = el(
+    "button",
+    {
+      type: "button",
+      class: "export-button",
+      "data-blocklab-export": "",
+      ...(enabled ? {} : { disabled: "true", "aria-disabled": "true" }),
+    },
+    txt("Export JSON"),
+  );
+  const hint = enabled
+    ? "Downloads the comparison currently shown. No request is re-run and the comparison is not changed."
+    : "Export is unavailable until a valid comparison is displayed.";
+  const bar = el(
+    "div",
+    { class: "export-bar" },
+    button,
+    paragraph("meta", hint),
+  );
+  const feedback = options.exportFeedback;
+  if (feedback !== undefined && feedback !== null) {
+    bar.children.push(
+      el(
+        "p",
+        {
+          class: feedback.error
+            ? "meta error export-feedback"
+            : "meta export-feedback",
+          role: feedback.error ? "alert" : "status",
+        },
+        txt(feedback.message),
+      ),
+    );
+  }
+  return bar;
 }
 
 function cellValue(cell: RouteCell): string {
@@ -215,10 +267,12 @@ function viemCard(view: ViemRouteView): ViewElement {
 
 function readyView(
   state: Extract<StudioComparisonState, { status: "ready" }>,
+  options: ComparisonViewOptions,
 ): ViewNode[] {
   const { model } = state;
   const nodes: ViewNode[] = [
     paragraph("meta", `Generated ${model.generatedAt}. ${model.summary}`),
+    exportBar(options, true),
   ];
 
   if (model.warnings.length > 0) {
@@ -274,7 +328,10 @@ function readyView(
 }
 
 /** Builds the complete read-only view description for a parsed snapshot. */
-export function comparisonViewNodes(state: StudioComparisonState): ViewNode[] {
+export function comparisonViewNodes(
+  state: StudioComparisonState,
+  options: ComparisonViewOptions = {},
+): ViewNode[] {
   if (state.status === "empty") {
     return [
       el("h3", {}, txt("No comparison yet")),
@@ -282,6 +339,7 @@ export function comparisonViewNodes(state: StudioComparisonState): ViewNode[] {
         "meta",
         "Run a comparison in the browser application to populate this view. Studio is read-only: it never executes an RPC request.",
       ),
+      exportBar(options, false),
     ];
   }
   if (state.status === "invalid") {
@@ -299,7 +357,8 @@ export function comparisonViewNodes(state: StudioComparisonState): ViewNode[] {
         ),
         list,
       ),
+      exportBar(options, false),
     ];
   }
-  return readyView(state);
+  return readyView(state, options);
 }

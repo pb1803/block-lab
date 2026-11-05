@@ -13,14 +13,23 @@ export const studioShell: StudioShell = {
 };
 
 export {
+  buildComparisonExport,
+  type ComparisonExportOptions,
+  type ComparisonExportResult,
   type CoverageView,
   createStudioSnapshot,
+  downloadComparisonExport,
+  type ExportCompleteness,
+  isComparisonExportDownloadSupported,
   type MethodRow,
   type MountedComparisonView,
   mountComparisonView,
   parseStudioSnapshot,
   STUDIO_COMPARISON_EVENT,
   STUDIO_COMPARISON_SCHEMA_VERSION,
+  STUDIO_EXPORT_KIND,
+  STUDIO_EXPORT_SCHEMA_VERSION,
+  type StudioComparisonExport,
   type StudioComparisonModel,
   type StudioComparisonState,
   type StudioRpcSnapshot,

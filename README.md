@@ -60,6 +60,13 @@ Viem probe results separately, and states that latency is not privacy and that
 the `passthrough` reference worker does not anonymize anything. Studio never
 issues an RPC request and never polls.
 
+Once a comparison is displayed, **Export JSON** downloads it as a redacted
+`blocklab.rpc-comparison` schema `1.0` artifact: a stable `runId`, an explicit
+`complete` / `incomplete` / `failed` label with reasons, per-attempt status,
+latency, harness routing, coverage, and Viem summaries. Raw parameters, headers,
+accounts, storage, endpoint URLs, and unredacted error text are never included,
+and exporting does not re-run the experiment.
+
 Existing Viem applications can use the same routes through
 `@blocklab/browser-rpc/viem`:
 

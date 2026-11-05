@@ -260,6 +260,38 @@ no reload, no polling in Studio. Injecting `{ schemaVersion: "1.0", comparison:
 null }` into `window.__blocklabStudioSnapshot` replaced the panel with a
 `role="alert"` block listing the issue, with zero fabricated rows.
 
+### Export verification (2026-11-05)
+
+`scripts/studio-export-check.mjs` performs a real comparison, clicks **Export
+JSON**, and reads the file Chrome actually wrote. It also records every network
+request made after the click.
+
+| run | worker | button | downloaded artifact | requests during export |
+|---|---|---|---|---|
+| L | `passthrough` (reference), self-test | disabled before, enabled after | `completeness: complete`, 4/4 on both routes, coverage 100%, worker classified *not anonymizing* | 0 |
+| M | `passthrough`, interactive Compare routes | disabled before, enabled after | `completeness: complete`, coverage 100% | 0 |
+| N | `tor-js` (network), self-test | disabled before, enabled after | `completeness: failed`, reason "Worker did not become ready within 60000ms", no fallback | 0 |
+| O | `nox` with a mainnet bootstrap | disabled before, enabled after | `completeness: failed`, reason `short bytes32 return`, no fallback | 0 |
+
+Run N was a real failure: the `tor-js` gateway did not become ready twice in a
+row at the time of verification. The export was still produced and is labelled
+`failed` with reasons, which is the intended behaviour; no completed network-worker
+run is claimed for this date.
+
+The downloaded JSON for run L was inspected directly: top-level keys
+`schemaVersion, kind, exportedAt, direct, anonRpc, methods, coverage, viem,
+runtime, limitations, redaction, run`; `run.runId` = `rpc-<16 hex>`; four direct
+and four Anon-RPC attempts; `runtime.origin` = `http://127.0.0.1:5210`; no
+endpoint host, token, `Bearer` value, parameter, header, account, or private-key
+field. The panel confirmed `Exported blocklab-rpc-comparison-…json (complete)`,
+and `window.__blocklabComparison` / `window.__blocklabStudioSnapshot` were
+byte-identical before and after the click.
+
+A real bug was found and fixed during this verification: revoking the Blob object
+URL synchronously after `click()` aborted the download in Chrome (the file stayed
+`.crdownload`). Revocation is now deferred; the unit tests assert the deferred
+order and the browser run downloads a complete file.
+
 ## What these numbers do and do not show
 
 They show that eligible read-only calls were routed through a hash-pinned,

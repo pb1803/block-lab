@@ -28,7 +28,7 @@ worker. Environment files are ignored by Git. Do not put credentials in the
 endpoint or commit local configuration. Run `pnpm build` first so
 `@blocklab/browser-rpc` exists as built output.
 
-The page exposes four actions: **Run requests** on the selected route,
+The page exposes four actions plus the Studio panel's export: **Run requests** on the selected route,
 **Compare routes** (same workload on both routes, then coverage, success rate,
 average latency, harness-routed count, and the privacy limits), **Run Viem
 client** (the same route through Viem's `createPublicClient`, calling
@@ -37,7 +37,9 @@ client** (the same route through Viem's `createPublicClient`, calling
 `window.__blocklabComparison`, and the same data is published as a
 `StudioRpcSnapshot` (`window.__blocklabStudioSnapshot`) so
 `@blocklab/studio/comparison` can render the panel read-only. The page owns
-execution; Studio never issues a request.
+execution; Studio never issues a request. Once a valid comparison is displayed,
+**Export JSON** in that panel downloads a redacted `blocklab.rpc-comparison`
+schema `1.0` artifact labelled `complete`, `incomplete`, or `failed`.
 
 The local experiment flow is:
 

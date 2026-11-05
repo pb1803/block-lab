@@ -177,3 +177,106 @@ pre {
   overflow-wrap: anywhere;
   font-size: 0.8rem;
 }
+
+/* Studio comparison panel */
+.studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.studio-card {
+  padding: 0.85rem;
+  border: 1px solid #24303d;
+  border-radius: 0.4rem;
+  background: #121a23;
+}
+
+.studio-card h4 {
+  margin: 0 0 0.5rem;
+  color: #9fb0c3;
+  font-size: 0.9rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.facts dt {
+  color: #9fb0c3;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.studio-table caption {
+  padding: 0.5rem 0;
+  color: #9fb0c3;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.studio-warning,
+.studio-error {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #6b4a1f;
+  border-radius: 0.4rem;
+  background: #241c12;
+}
+
+.studio-error {
+  border-color: #6b2a2a;
+  background: #241416;
+}
+
+.studio-warning h4,
+.studio-error h3 {
+  margin: 0 0 0.4rem;
+}
+
+.studio-warning ul,
+.studio-error ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: #aab6c5;
+}
+
+.export-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #24303d;
+  border-radius: 0.4rem;
+  background: #121a23;
+}
+
+.export-bar .meta {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.export-button {
+  flex: 0 0 auto;
+  background: #9fd6c0;
+}
+
+.export-feedback {
+  flex-basis: 100%;
+  margin: 0;
+}

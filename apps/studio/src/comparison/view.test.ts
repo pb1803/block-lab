@@ -172,3 +172,79 @@ describe("Studio comparison view", () => {
     expect(value).not.toContain("{");
   });
 });
+
+describe("Studio export control", () => {
+  function button(
+    value: unknown,
+    options: Parameters<typeof comparisonViewNodes>[1],
+  ) {
+    const nodes = comparisonViewNodes(parseStudioSnapshot(value), options);
+    const buttons = nodes.flatMap((node) => find(node, "button"));
+    expect(buttons).toHaveLength(1);
+    const only = buttons[0];
+    if (only?.kind !== "element") throw new Error("expected a button element");
+    return only;
+  }
+
+  it("shows a disabled Export JSON action without a valid comparison", () => {
+    const empty = button(undefined, { exportEnabled: true });
+    expect(empty.attrs["data-blocklab-export"]).toBe("");
+    expect(empty.attrs.disabled).toBe("true");
+    expect(texts([empty]).join("")).toBe("Export JSON");
+  });
+
+  it("stays disabled for an invalid payload even when export is supported", () => {
+    const invalid = button({ schemaVersion: "1.0" }, { exportEnabled: true });
+    expect(invalid.attrs.disabled).toBe("true");
+  });
+
+  it("enables export for a valid comparison", () => {
+    const ready = button(snapshot(okComparison), { exportEnabled: true });
+    expect(ready.attrs.disabled).toBeUndefined();
+    const nodes = comparisonViewNodes(
+      parseStudioSnapshot(snapshot(okComparison)),
+      {
+        exportEnabled: true,
+      },
+    );
+    expect(texts(nodes).join(" ")).toContain("No request is re-run");
+  });
+
+  it("reports the last export attempt next to the action", () => {
+    const ok = allText(snapshot(okComparison));
+    expect(ok.join(" ")).not.toContain("Exported blocklab-rpc-comparison");
+
+    const nodes = comparisonViewNodes(
+      parseStudioSnapshot(snapshot(okComparison)),
+      {
+        exportEnabled: true,
+        exportFeedback: {
+          message: "Exported blocklab-rpc-comparison-x.json.",
+          error: false,
+        },
+      },
+    );
+    const status = nodes
+      .flatMap((node) => find(node, "p"))
+      .find((node) => node.kind === "element" && node.attrs.role === "status");
+    expect(status).toBeDefined();
+    expect(texts(nodes).join(" ")).toContain(
+      "Exported blocklab-rpc-comparison-x.json.",
+    );
+
+    const failed = comparisonViewNodes(
+      parseStudioSnapshot(snapshot(okComparison)),
+      {
+        exportEnabled: true,
+        exportFeedback: {
+          message: "Export failed: no comparison.",
+          error: true,
+        },
+      },
+    );
+    const alert = failed
+      .flatMap((node) => find(node, "p"))
+      .find((node) => node.kind === "element" && node.attrs.role === "alert");
+    expect(alert).toBeDefined();
+  });
+});

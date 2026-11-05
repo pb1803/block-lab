@@ -256,14 +256,21 @@ and no direct fallback. `nym` and `nox` were not successfully exercised, and no
 anonymity property is claimed or measured. The CLI states that the harness is
 browser-only and never simulates it.
 
-ANON-03 (Viem adapter) and ANON-08 (read-only Studio comparison view) were
-completed afterwards as separate changes. The Studio panel renders the
+ANON-03 (Viem adapter), ANON-08 (read-only Studio comparison view), and ANON-09
+(redacted comparison export) were completed afterwards as separate changes.
+
+The Studio panel renders the
 `RouteComparison` payload and the Viem probe results without executing any RPC
 request itself: it validates untrusted input, recomputes coverage from the
 attempts, keeps skipped methods distinct from successes, labels `passthrough` as
-a non-anonymizing reference worker, and states that latency is not privacy. A
-future Studio phase may add orchestration behind the local-agent boundary, but
-the comparison panel stays read-only.
+a non-anonymizing reference worker, and states that latency is not privacy.
+
+The export downloads a validated
+`blocklab.rpc-comparison` schema `1.0` artifact with a stable run id and an
+explicit completeness label; it is built from the validated model, so raw
+parameters, headers, accounts, storage, endpoint URLs, and unredacted error text
+cannot reach it. A future Studio phase may add orchestration behind the
+local-agent boundary, but the comparison panel stays read-only.
 
 **Exit gate:** The supported browser demo routes eligible reads through Anon-RPC by default, or the feature is dropped.
 

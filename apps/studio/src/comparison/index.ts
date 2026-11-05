@@ -1,8 +1,32 @@
 export {
   type ComparisonSource,
+  type ExportAttempt,
+  type MountComparisonOptions,
   type MountedComparisonView,
   mountComparisonView,
 } from "./dom.js";
+export {
+  type DownloadAnchor,
+  type DownloadEnvironment,
+  type DownloadResult,
+  downloadComparisonExport,
+  isComparisonExportDownloadSupported,
+} from "./download.js";
+export {
+  buildComparisonExport,
+  type ComparisonExportArtifact,
+  type ComparisonExportOptions,
+  type ComparisonExportResult,
+  comparisonExportFilename,
+  type ExportCompleteness,
+  type ExportedAttempt,
+  type ExportedRoute,
+  type ExportedRouteTotals,
+  type ExportedViemRoute,
+  STUDIO_EXPORT_KIND,
+  STUDIO_EXPORT_SCHEMA_VERSION,
+  type StudioComparisonExport,
+} from "./export.js";
 export {
   type CoverageView,
   createStudioSnapshot,
@@ -19,6 +43,7 @@ export {
   type ViemRouteView,
 } from "./model.js";
 export {
+  type ComparisonViewOptions,
   comparisonViewNodes,
   type ViewElement,
   type ViewNode,
