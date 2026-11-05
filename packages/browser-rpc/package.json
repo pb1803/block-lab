@@ -1,0 +1,14 @@
+{
+  "name": "@blocklab/browser-rpc",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anon-rpc/browser-harness": "0.4.0"
+  }
+}

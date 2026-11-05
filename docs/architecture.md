@@ -9,6 +9,7 @@
 - `@blocklab/evidence` owns redacted local result persistence, evaluation, digesting, and report formatting.
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
 - `apps/studio` is currently a browser-safe shell. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
+- `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. Nothing in the Node.js dependency graph imports it.
 
 ## Dependency direction
 
@@ -18,16 +19,19 @@ core
 ├── scenarios
 ├── runner ──> scenarios
 ├── evidence
+├── browser-rpc ──(lazy, browser only)──> @anon-rpc/browser-harness
 ├── apps/cli ──> inspector, scenarios, runner, evidence
+├── apps/sample-dapp ──> browser-rpc
+├── apps/anon-rpc-poc ──> browser-rpc
 └── apps/studio ──> core
 ```
 
-The browser-only Anon-RPC harness will remain outside the Node.js CLI dependency graph. Arkiv will be added later behind an integration interface, after a real proof of concept.
+The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv will be added later behind an integration interface, after a real proof of concept.
 
-`apps/anon-rpc-poc` is an isolated browser-only Vite application. It owns the
-`@anon-rpc/browser-harness@0.4.0` dependency and uses a one-time bootstrap
-provider plus the harness's bound `fetch`. It is not part of the CLI or runner
-dependency graph, and it has no ordinary-RPC fallback.
+`apps/anon-rpc-poc` is a thin browser-only Vite application over the shared
+package: it exposes explicit initialize/run/close buttons and a worker selector,
+and it has no ordinary-RPC fallback. `apps/sample-dapp` adds route selection and
+the comparison workflow on top of the same transports.
 
 ## Experiment data flow
 
@@ -157,12 +161,39 @@ and `4` when evidence is inconclusive. The CLI handles SIGINT/SIGTERM by
 requesting cooperative execution cancellation; proxy cleanup remains owned by
 the runner lifecycle.
 
-## Anon-RPC browser POC
+## Browser RPC routes
 
-The POC explicitly initializes `AnonRpcWorker`, awaits `worker.ready`, invokes
-only four read-only Ethereum methods, collects worker logs through
-`acceptLog({ signal })`, and calls `worker.close()` during cleanup. The
-bootstrap provider is separate from harness-routed requests and is used only
-to read the on-chain worker specifier. The official passthrough worker proves
-the browser sandbox and hash-pinned loading boundary; it does not prove
-anonymizing routing or privacy.
+Two transports implement one interface (`initialize`, `request`, `close`,
+`state`, `label`):
+
+```text
+DirectRpcTransport ── fetch ───────────────────────────────> RPC endpoint
+AnonRpcTransport  ── worker.fetch ── sandboxed worker ─────> RPC endpoint
+                        └── bootstrap provider: specifier read only
+```
+
+Both routes share `callJsonRpc` for encoding, timeouts, aborts, and error
+classification, so a difference between the routes can only come from the
+transport. The eligible surface is fixed to `eth_chainId`, `eth_blockNumber`,
+`eth_getBalance`, and `eth_call` with internally generated parameters, and
+wallet/signing methods are rejected at runtime. A failed or closed harness
+reports `not-ready` and never falls back to a direct request. An initialization
+failure closes the worker, is shown in the UI, and `receivedThroughHarness` stays
+`false`, so a routed response can never be claimed for a request that did not go
+through the sandbox.
+
+`buildComparison` produces the stable `1.0` payload (`window.__blocklabComparison`):
+per-route attempts with method, route, start/end timestamps, latency, success,
+error category, worker readiness, and `receivedThroughHarness`; per-route
+summaries; coverage; worked examples of excluded methods; and explicit notes that
+latency is not a privacy measurement and that `reference` workers do not
+anonymize.
+
+`scripts/browser-selftest.mjs` drives headless Chrome over CDP with Node's built-in
+WebSocket client, opens `?selftest=1`, and prints the payload, so the browser path
+is verifiable without a manual click-through and without a browser-automation
+dependency. `apps/sample-dapp/src/selftest.ts` publishes only that payload on
+`window.__blocklabSelfTest`.
+
+Measured results and their limits are recorded in
+[docs/anon-rpc-poc.md](anon-rpc-poc.md).

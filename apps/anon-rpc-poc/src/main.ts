@@ -1,14 +1,15 @@
 import {
-  AnonRpcSession,
+  AnonRpcTransport,
+  findWorker,
   type RpcObservation,
-  SUPPORTED_METHODS,
-} from "./harness.js";
+  runWorkload,
+} from "@blocklab/browser-rpc";
 import "./style.css";
 
 const endpoint = import.meta.env.VITE_ANON_RPC_ENDPOINT?.trim();
-const workerAddress =
-  import.meta.env.VITE_ANON_RPC_WORKER_ADDRESS?.trim() ??
-  "0x4fd77be300f31c5fe6ab266d35d27750a3478d27";
+const workerId = import.meta.env.VITE_ANON_RPC_WORKER?.trim() ?? "passthrough";
+const worker = findWorker(workerId);
+
 const statusElement = document.querySelector<HTMLParagraphElement>("#status");
 const resultsElement = document.querySelector<HTMLPreElement>("#results");
 const initializeButton =
@@ -26,20 +27,27 @@ if (
   throw new Error("POC page elements are missing.");
 }
 
+const routeMissing =
+  endpoint === undefined || endpoint.length === 0 || worker === undefined;
+
 const session =
-  endpoint === undefined || endpoint.length === 0
-    ? undefined
-    : new AnonRpcSession({
+  routeMissing === false
+    ? new AnonRpcTransport({
         endpoint,
         bootstrapRpcUrl: endpoint,
-        workerAddress,
-      });
+        worker,
+        ...(worker.exampleConfig === undefined
+          ? {}
+          : { config: worker.exampleConfig }),
+      })
+    : undefined;
 
 const observations: RpcObservation[] = [];
 
 initializeButton.addEventListener("click", async () => {
   if (session === undefined) {
-    statusElement.textContent = "Set VITE_ANON_RPC_ENDPOINT and restart Vite.";
+    statusElement.textContent =
+      "Set VITE_ANON_RPC_ENDPOINT (and VITE_ANON_RPC_WORKER) and restart Vite.";
     return;
   }
   initializeButton.disabled = true;
@@ -47,7 +55,9 @@ initializeButton.addEventListener("click", async () => {
   try {
     await session.initialize();
     statusElement.textContent =
-      "Worker ready. Bootstrap provider was used only to read the specifier.";
+      worker.kind === "network"
+        ? `Worker ready (${worker.id} — anonymizing network worker).`
+        : `Worker ready (${worker.id} — reference worker, NOT anonymizing).`;
     runButton.disabled = false;
     closeButton.disabled = false;
   } catch (error) {
@@ -63,9 +73,7 @@ runButton.addEventListener("click", async () => {
   runButton.disabled = true;
   statusElement.textContent =
     "Running read-only requests through the harness...";
-  for (const method of SUPPORTED_METHODS) {
-    observations.push(await session.request(method));
-  }
+  observations.push(...(await runWorkload(session)));
   resultsElement.textContent = JSON.stringify(observations, null, 2);
   statusElement.textContent = "Read-only request batch complete.";
   runButton.disabled = false;

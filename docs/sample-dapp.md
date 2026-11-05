@@ -2,8 +2,15 @@
 
 The sample dApp is a small Vite/TypeScript browser application in
 [apps/sample-dapp](../apps/sample-dapp). It does not connect a wallet, sign,
-broadcast transactions, or execute project scripts. It sends read-only
-`eth_chainId` and `eth_blockNumber` requests to the configured endpoint.
+broadcast transactions, or execute project scripts. It sends four read-only
+requests (`eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `eth_call`) over one
+of two routes:
+
+- **Anon-RPC** (default): hash-pinned worker inside a browser sandbox.
+- **Direct RPC** (control): the configured endpoint, fetched normally.
+
+Selecting a route is explicit; a failed Anon-RPC worker never falls back to a
+direct request. Route details are in [anon-rpc-poc.md](anon-rpc-poc.md).
 
 ## Run the sample
 
@@ -15,9 +22,17 @@ pnpm --filter @blocklab/sample-dapp dev
 ```
 
 Open the URL printed by Vite. Set `VITE_RPC_URL` in
-`apps/sample-dapp/.env.local` to change the endpoint. Environment files are
-ignored by Git. Do not put credentials in the endpoint or commit local
-configuration.
+`apps/sample-dapp/.env.local` to change the endpoint, and
+`VITE_ANON_RPC_WORKER` (`passthrough`, `tor-js`, `nym`, or `nox`) to change the
+worker. Environment files are ignored by Git. Do not put credentials in the
+endpoint or commit local configuration. Run `pnpm build` first so
+`@blocklab/browser-rpc` exists as built output.
+
+The page exposes three actions: **Run requests** on the selected route,
+**Compare routes** (same workload on both routes, then coverage, success rate,
+average latency, harness-routed count, and the privacy limits), and **Close
+worker**. The comparison payload is also available as
+`window.__blocklabComparison`.
 
 The local experiment flow is:
 
@@ -70,23 +85,32 @@ are not stored.
 
 ## Expected output
 
-With Anvil running and `VITE_RPC_URL=http://127.0.0.1:8545`, the page shows:
+With Anvil running and `VITE_RPC_URL=http://127.0.0.1:8545`, the direct route
+shows four successful reads with the reported chain ID `31337` and latest block,
+plus measured per-request latency. With a worker configured, the Anon-RPC route
+shows the same methods marked as harness-routed, and the comparison panel shows
+both routes side by side.
 
-```text
-RPC connection successful.
-Chain ID: 31337
-Latest block: 0
-Read latency: <measured milliseconds>
+Headless-browser verification of the same page (no automation dependency):
+
+```powershell
+node scripts/browser-selftest.mjs --url http://127.0.0.1:5173/ --timeout 200000
 ```
 
 When the endpoint is unavailable, the page shows a categorized RPC error and
-does not display the configured endpoint.
+does not display the configured endpoint. When the worker fails to initialize,
+the failure is shown with the harness message and no direct request is made.
 
 ## Limitations
 
-- The sample has no wallet or transaction flow.
-- It currently performs one chain-ID read and one block-number read.
+- The sample has no wallet or transaction flow, and wallet/signing methods are
+  rejected at runtime.
+- It performs four fixed read-only requests on whichever route is selected.
 - It does not claim resilience or failover.
+- Anon-RPC routing is measured, but anonymity is not: `passthrough` is a
+  reference worker with no privacy, `network` classification is the adopter
+  list's claim, and exit IPs, observer views, and traffic analysis are out of
+  scope. See [anon-rpc-poc.md](anon-rpc-poc.md).
 - The proxy currently rejects JSON-RPC batches and transaction/signing methods.
 - The runner does not forcibly terminate an uncooperative asynchronous task.
 - Full `blocklab test rpc-blackout` orchestration and evaluator are planned for

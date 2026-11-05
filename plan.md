@@ -215,12 +215,11 @@ unimplemented.
 9. Record coverage, success rate, latency, and exclusions without raw payloads.
 10. Make a go/no-go decision based on working default routing.
 
-Phase 12 status: the isolated browser POC uses the verified
-`@anon-rpc/browser-harness@0.4.0` constructor, readiness, fetch, log, and
-cleanup APIs. Automated lifecycle tests pass. A real browser run verified
-initialization, four read-only requests, error visibility, and cleanup against
-the official passthrough worker. Actual anonymizing-worker routing remains
-unverified; the passthrough worker must not be described as anonymous.
+Phase 12 status: superseded by Phase 13. The verified harness lifecycle
+(constructor, `ready`, `fetch`, `acceptLog`, `close`) now lives in
+`@blocklab/browser-rpc`, so the POC contains no local harness code and no
+harness tests of its own. Step 6 (Viem transport adapter) is still open and is
+tracked as backlog item `ANON-03`.
 
 **Exit gate:** Anon-RPC is either proven in the browser or explicitly excluded from sponsor claims.
 
@@ -236,6 +235,26 @@ unverified; the passthrough worker must not be described as anonymous.
 8. Add the Studio comparison payload.
 9. Keep the CLI explicit that the harness is browser-only.
 10. Capture end-to-end evidence of default routing.
+
+Phase 13 status: implemented. `@blocklab/browser-rpc` provides one interface with
+two independent transports (`direct`, `anon-rpc`), a fixed read-only allowlist,
+typed errors, lazy browser-only harness loading, explicit init/close, and a
+stable `1.0` comparison payload. The sample dApp selects Anon-RPC by default,
+keeps Direct RPC as an explicit control with no silent fallback, and exposes
+method, route, timestamps, latency, success/failure, error category, worker
+readiness, harness-routed count, and coverage. `scripts/browser-selftest.mjs`
+verifies the browser path over CDP without an automation dependency.
+
+Verified in headless Chrome 156 on 2026-11-05 against a public mainnet endpoint:
+reference `passthrough` routed 4/4 (avg 941 ms vs 365 ms direct); the anonymizing
+`tor-js` worker routed 4/4 (avg 2996 ms vs 376 ms direct); a deliberate
+specifier/chain mismatch failed with `not-ready` on all attempts, 0% coverage,
+and no direct fallback. `nym` and `nox` were not successfully exercised, and no
+anonymity property is claimed or measured. The CLI states that the harness is
+browser-only and never simulates it.
+
+Not delivered in this phase: the Viem transport adapter (`ANON-03`) and the
+Studio comparison view (`ANON-08`).
 
 **Exit gate:** The supported browser demo routes eligible reads through Anon-RPC by default, or the feature is dropped.
 

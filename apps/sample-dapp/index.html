@@ -8,12 +8,58 @@
   <body>
     <main>
       <p class="eyebrow">BLOCKLAB sample</p>
-      <h1>Ethereum RPC health</h1>
-      <p class="subtitle">A read-only dApp workload for the local test environment.</p>
-      <section id="status" aria-live="polite">
-        <p>Loading RPC status…</p>
+      <h1>Read-only RPC routes</h1>
+      <p class="subtitle">
+        Compare an ordinary RPC read workload with the Anon-RPC browser harness.
+        Read-only methods only. No wallet, no signing, no transactions.
+      </p>
+
+      <section class="panel" aria-labelledby="route-heading">
+        <h2 id="route-heading">Route</h2>
+        <fieldset id="route-selector">
+          <legend class="visually-hidden">Active RPC route</legend>
+          <label>
+            <input type="radio" name="route" value="direct" />
+            Direct RPC
+          </label>
+          <label>
+            <input type="radio" name="route" value="anon-rpc" />
+            Anon-RPC (browser harness)
+          </label>
+        </fieldset>
+        <p id="route-detail" class="meta"></p>
+        <div class="actions">
+          <button id="run" type="button" disabled>Run read workload</button>
+          <button id="compare" type="button" disabled>Compare routes</button>
+          <button id="close" type="button" disabled>
+            Close Anon-RPC session
+          </button>
+        </div>
       </section>
-      <button id="retry" type="button">Retry</button>
+
+      <section class="panel" aria-labelledby="status-heading">
+        <h2 id="status-heading">Status</h2>
+        <p id="status" aria-live="polite">Starting…</p>
+      </section>
+
+      <section class="panel" aria-labelledby="results-heading">
+        <h2 id="results-heading">Requests</h2>
+        <div id="results">
+          <p class="meta">No requests have been made yet.</p>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="comparison-heading">
+        <h2 id="comparison-heading">Comparison</h2>
+        <div id="comparison">
+          <p class="meta">
+            Run a comparison to measure both routes with the same workload.
+          </p>
+        </div>
+        <p id="privacy-note" class="note"></p>
+      </section>
+
+      <pre id="selftest-output" hidden></pre>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

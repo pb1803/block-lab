@@ -18,18 +18,56 @@ BLOCKLAB is planned as a TypeScript/JavaScript pnpm workspace monorepo with a sh
 
 ## Planned integrations
 
-- Ethereum Foundation Anon-RPC
-- Arkiv
+- Ethereum Foundation Anon-RPC — browser integration implemented (see below)
+- Arkiv — planned
 - ENSv2 is conditional and will be included only if its real, central workflow is validated within the project timeline.
-
-These integrations are planned and are not implemented yet.
 
 ## Project status
 
 The local inspector, loopback RPC proxy, deterministic `rpc-blackout`
 experiment, evidence evaluator, replay/comparison APIs, and first-class CLI are
-implemented. Studio, Anon-RPC, Arkiv, ENSv2, automatic failover, and hosted
-services remain out of scope for the current local workflow.
+implemented. The Anon-RPC browser integration is implemented in
+`@blocklab/browser-rpc` and used by `apps/sample-dapp` and `apps/anon-rpc-poc`.
+Studio, Arkiv, ENSv2, automatic failover, and hosted services remain out of scope
+for the current local workflow. Anon-RPC is browser-only: the CLI never imports
+or emulates the harness.
+
+## Anon-RPC browser routes
+
+Eligible read-only calls (`eth_chainId`, `eth_blockNumber`, `eth_getBalance`,
+`eth_call`) can run on two independent routes behind one interface: `direct`
+(ordinary RPC, used as the control) and `anon-rpc` (hash-pinned worker inside a
+browser sandbox). There is no silent fallback in either direction, and no
+wallet, signing, or private-key handling anywhere.
+
+```bash
+pnpm install
+pnpm build
+cp apps/sample-dapp/.env.example apps/sample-dapp/.env.local
+pnpm --filter @blocklab/sample-dapp dev
+```
+
+Anon-RPC is the default selected route in the sample dApp. **Compare routes**
+runs the same workload on both routes and reports method, route, timestamps,
+latency, success/failure, error category, worker readiness, harness-routed
+count, coverage, and the privacy limits of the measurement.
+
+Headless-browser verification (no browser-automation dependency):
+
+```bash
+node scripts/browser-selftest.mjs --url http://127.0.0.1:5173/ --timeout 200000
+```
+
+Verified on 2026-11-05 in HeadlessChrome 156 against
+`https://ethereum-rpc.publicnode.com`: the reference `passthrough` worker routed
+4/4 reads (avg 941 ms vs 365 ms direct), and the anonymizing `tor-js` worker
+routed 4/4 reads (avg 2996 ms vs 376 ms direct). A deliberate specifier/chain
+mismatch failed loudly with `not-ready` on all four attempts, 0% coverage, and no
+direct request. These numbers measure routing and cost, **not** anonymity:
+`passthrough` is a reference worker that provides no privacy, `network` worker
+classification is the adopter list's claim, and BLOCKLAB does not measure exit
+IPs, observer views, or traffic analysis. Details and limitations:
+[docs/anon-rpc-poc.md](docs/anon-rpc-poc.md).
 
 ## Package manager
 

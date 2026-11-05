@@ -23,9 +23,9 @@ importers:
 
   apps/anon-rpc-poc:
     dependencies:
-      '@anon-rpc/browser-harness':
-        specifier: 0.4.0
-        version: 0.4.0
+      '@blocklab/browser-rpc':
+        specifier: workspace:*
+        version: link:../../packages/browser-rpc
     devDependencies:
       vite:
         specifier: ^7.0.0
@@ -51,9 +51,9 @@ importers:
 
   apps/sample-dapp:
     dependencies:
-      '@blocklab/rpc-probe':
+      '@blocklab/browser-rpc':
         specifier: workspace:*
-        version: link:../../packages/rpc-probe
+        version: link:../../packages/browser-rpc
     devDependencies:
       vite:
         specifier: ^7.0.0
@@ -64,6 +64,12 @@ importers:
       '@blocklab/core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  packages/browser-rpc:
+    dependencies:
+      '@anon-rpc/browser-harness':
+        specifier: 0.4.0
+        version: 0.4.0
 
   packages/core: {}
 

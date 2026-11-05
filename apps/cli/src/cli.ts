@@ -202,6 +202,9 @@ function printHelp(output: (value: string) => void): void {
   output(
     "Options: --evidence-dir, --port, --start-offset, --duration, --experiment-duration, --timeout, --json\n",
   );
+  output(
+    "\nAnon-RPC is browser-only: the CLI never imports or emulates the harness.\nRun the sample dApp (apps/sample-dapp) or Studio for Anon-RPC measurements.\n",
+  );
 }
 
 function printConfig(
@@ -219,6 +222,9 @@ function printConfig(
   );
   output(`Upstream: ${config.defaultProxy.upstream}\n`);
   output(`Supported scenarios: ${config.supportedScenarios.join(", ")}\n`);
+  output(
+    "Anon-RPC: browser-only integration; unavailable from the CLI and never simulated.\n",
+  );
   output(`Configuration precedence: ${config.precedence.join(" > ")}\n`);
 }
 

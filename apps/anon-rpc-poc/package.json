@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@anon-rpc/browser-harness": "0.4.0"
+    "@blocklab/browser-rpc": "workspace:*"
   },
   "devDependencies": {
     "vite": "^7.0.0"

@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@blocklab/rpc-probe": "workspace:*"
+    "@blocklab/browser-rpc": "workspace:*"
   },
   "devDependencies": {
     "vite": "^7.0.0"

@@ -10,8 +10,8 @@ body {
 }
 
 main {
-  max-width: 640px;
-  margin: 12vh auto;
+  max-width: 900px;
+  margin: 6vh auto;
   padding: 2rem;
 }
 
@@ -26,16 +26,55 @@ h1 {
   margin-bottom: 0.5rem;
 }
 
-.subtitle {
+h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9fb0c3;
+}
+
+h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.subtitle,
+.meta {
   color: #aab6c5;
 }
 
+.note {
+  color: #aab6c5;
+  font-size: 0.85rem;
+}
+
 section {
-  margin: 2rem 0 1rem;
+  margin: 1.5rem 0 1rem;
   padding: 1rem;
   border: 1px solid #2a3746;
   border-radius: 0.5rem;
   background: #161e28;
+}
+
+fieldset {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  border: 0;
+}
+
+label {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 button {
@@ -45,4 +84,96 @@ button {
   border-radius: 0.35rem;
   background: #72d6b1;
   cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+#status[data-tone="error"] {
+  color: #ff9d9d;
+}
+
+#status[data-tone="success"] {
+  color: #72d6b1;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid #24303d;
+  vertical-align: top;
+}
+
+th {
+  color: #9fb0c3;
+  font-weight: 600;
+}
+
+tr[data-status="failed"] td {
+  color: #ffb4b4;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card {
+  padding: 0.85rem;
+  border: 1px solid #24303d;
+  border-radius: 0.4rem;
+  background: #121a23;
+}
+
+.card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.card dt {
+  color: #9fb0c3;
+}
+
+.card dd {
+  margin: 0;
+}
+
+.error {
+  color: #ff9d9d;
+}
+
+.notes {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  color: #aab6c5;
+  font-size: 0.85rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
 }
