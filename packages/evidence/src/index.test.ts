@@ -121,6 +121,9 @@ describe("evidence validation and classification", () => {
     expect(() =>
       validateEvidence({ ...evidence, evaluation: undefined }),
     ).toThrow(EvidenceValidationError);
+    expect(() =>
+      validateEvidence({ ...evidence, evidenceDigest: "not-a-digest" }),
+    ).toThrow(EvidenceValidationError);
     expect(EVIDENCE_SCHEMA_VERSION).toBe("1.0");
   });
 });
@@ -133,6 +136,7 @@ describe("rpc-blackout evaluation and metrics", () => {
       record(200, "forwarded_success", "recovery"),
     ]);
     expect(evidence.evaluation.status).toBe("passed");
+    expect(evidence.evidenceDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(evidence.evaluation.metrics).toMatchObject({
       totalRequests: 3,
       successfulForwardedRequests: 2,

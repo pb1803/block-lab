@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   link,
   mkdir,
@@ -94,6 +94,7 @@ export interface RpcBlackoutEvidence {
   readonly finishedAt: string;
   readonly terminalState: TerminalState;
   readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
   readonly evaluation: ExperimentEvaluation;
   readonly warnings: readonly string[];
   readonly limitations: readonly string[];
@@ -261,7 +262,9 @@ export function validateEvidence(
     !["completed", "failed", "cancelled", "timed_out"].includes(
       String(value.terminalState),
     ) ||
-    !Array.isArray(value.observations)
+    !Array.isArray(value.observations) ||
+    typeof value.evidenceDigest !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.evidenceDigest)
   ) {
     throw new EvidenceValidationError(
       "Evidence terminal state or observations are invalid.",
@@ -530,6 +533,21 @@ export function createRpcBlackoutEvidence(
             "Execution did not complete normally.",
           ],
         };
+  const digestInput = {
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    executionId: execution.executionId,
+    scenarioId: "rpc-blackout",
+    scenarioVersion: RPC_BLACKOUT_SCENARIO_VERSION,
+    configuration: schedule,
+    startedAt,
+    finishedAt,
+    terminalState: execution.state,
+    observations,
+    evaluation: completedEvaluation,
+  };
+  const evidenceDigest = createHash("sha256")
+    .update(JSON.stringify(digestInput))
+    .digest("hex");
   const evidence: RpcBlackoutEvidence = {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     recordId: options.recordId ?? randomUUID(),
@@ -541,6 +559,7 @@ export function createRpcBlackoutEvidence(
     finishedAt,
     terminalState: execution.state,
     observations,
+    evidenceDigest,
     evaluation: completedEvaluation,
     warnings: options.warnings ?? [],
     limitations: options.limitations ?? [
