@@ -28,6 +28,10 @@ export type EvidenceOutcome =
   | "upstream_timeout"
   | "upstream_unavailable"
   | "injected_blackout"
+  | "injected_failure"
+  | "rate_limited"
+  | "injected_connection_failure"
+  | "injected_malformed_response"
   | "invalid_request"
   | "proxy_error";
 
@@ -37,6 +41,10 @@ const EVIDENCE_OUTCOMES: readonly EvidenceOutcome[] = [
   "upstream_timeout",
   "upstream_unavailable",
   "injected_blackout",
+  "injected_failure",
+  "rate_limited",
+  "injected_connection_failure",
+  "injected_malformed_response",
   "invalid_request",
   "proxy_error",
 ];
@@ -441,6 +449,40 @@ function assertIntermittentFailureSchedule(
       "Intermittent failure schedule must have valid integer window parameters.",
     );
   }
+  const totalSpan =
+    startOffsetMs +
+    windowCount * failureDurationMs +
+    (windowCount - 1) * recoveryIntervalMs;
+  assertOptionalExperimentDuration(schedule, totalSpan);
+  if (
+    schedule.httpStatus !== undefined &&
+    (typeof schedule.httpStatus !== "number" ||
+      !Number.isInteger(schedule.httpStatus) ||
+      schedule.httpStatus < 400 ||
+      schedule.httpStatus > 599)
+  ) {
+    throw new EvidenceValidationError(
+      "Intermittent failure HTTP status must be between 400 and 599.",
+    );
+  }
+}
+
+function assertOptionalExperimentDuration(
+  schedule: Record<string, unknown>,
+  requiredDurationMs?: number,
+): void {
+  const duration = schedule.experimentDurationMs;
+  if (
+    duration !== undefined &&
+    (typeof duration !== "number" ||
+      !Number.isInteger(duration) ||
+      duration <= 0 ||
+      (requiredDurationMs !== undefined && requiredDurationMs > duration))
+  ) {
+    throw new EvidenceValidationError(
+      "Fault schedule must fit within a positive experiment duration.",
+    );
+  }
 }
 
 function assertRateLimitSchedule(
@@ -462,6 +504,27 @@ function assertRateLimitSchedule(
       "Rate limit configuration must define valid integer maxRequests and windowMs.",
     );
   }
+  if (
+    schedule.cooldownMs !== undefined &&
+    (typeof schedule.cooldownMs !== "number" ||
+      !Number.isInteger(schedule.cooldownMs) ||
+      schedule.cooldownMs < 0)
+  ) {
+    throw new EvidenceValidationError(
+      "Rate limit cooldown must be a non-negative integer.",
+    );
+  }
+  if (
+    schedule.retryAfterSeconds !== undefined &&
+    (typeof schedule.retryAfterSeconds !== "number" ||
+      !Number.isInteger(schedule.retryAfterSeconds) ||
+      schedule.retryAfterSeconds <= 0)
+  ) {
+    throw new EvidenceValidationError(
+      "Rate limit Retry-After must be a positive integer.",
+    );
+  }
+  assertOptionalExperimentDuration(schedule);
 }
 
 function assertConnectionFailureSchedule(
@@ -486,6 +549,7 @@ function assertConnectionFailureSchedule(
       "Connection failure configuration must include a valid fault mode and positive duration.",
     );
   }
+  assertOptionalExperimentDuration(schedule, startOffsetMs + durationMs);
 }
 
 function assertMalformedResponseSchedule(
@@ -517,6 +581,7 @@ function assertMalformedResponseSchedule(
       "Malformed response configuration must include a valid mode and positive window.",
     );
   }
+  assertOptionalExperimentDuration(schedule, startOffsetMs + durationMs);
 }
 
 function assertObservation(
@@ -737,6 +802,229 @@ export function normalizeLatencyProxyEvidence(
         Date.parse(left.timestamp) - Date.parse(right.timestamp) ||
         left.correlationId.localeCompare(right.correlationId),
     );
+}
+
+function normalizeScenarioProxyEvidence(
+  records: readonly ProxyEvidenceLike[],
+  classify: (record: ProxyEvidenceLike) => EvidencePhase,
+): readonly EvidenceObservation[] {
+  return [...records]
+    .sort(
+      (left, right) =>
+        Date.parse(left.requestTimestamp ?? left.timestamp) -
+          Date.parse(right.requestTimestamp ?? right.timestamp) ||
+        left.correlationId.localeCompare(right.correlationId),
+    )
+    .map((record) => ({
+      phase: classify(record),
+      timestamp: record.timestamp,
+      ...(record.requestTimestamp === undefined
+        ? {}
+        : { requestTimestamp: record.requestTimestamp }),
+      method: record.method,
+      outcome: record.outcome,
+      injected: record.injected,
+      latencyMs: record.latencyMs,
+      ...(record.errorCategory === undefined
+        ? {}
+        : { errorCategory: record.errorCategory }),
+      correlationId: record.correlationId,
+      ...(record.injectedDelayMs === undefined
+        ? {}
+        : { injectedDelayMs: record.injectedDelayMs }),
+    }))
+    .sort(
+      (left, right) =>
+        Date.parse(left.timestamp) - Date.parse(right.timestamp) ||
+        left.correlationId.localeCompare(right.correlationId),
+    );
+}
+
+function classifyScheduledRequest(
+  record: ProxyEvidenceLike,
+  startedAt: string,
+  startOffsetMs: number,
+  durationMs: number,
+): EvidencePhase {
+  const elapsed =
+    Date.parse(record.requestTimestamp ?? record.timestamp) -
+    Date.parse(startedAt);
+  return elapsed < startOffsetMs
+    ? "baseline"
+    : elapsed < startOffsetMs + durationMs
+      ? "fault"
+      : "recovery";
+}
+
+function evaluateInjectedFault(
+  observations: readonly EvidenceObservation[],
+  startedAt: string,
+  schedule: BlackoutSchedule,
+  expectedOutcome: EvidenceOutcome,
+  scenarioName: string,
+): ExperimentEvaluation {
+  const metrics = calculateMetrics(observations, startedAt, schedule);
+  const baselineObservations = phaseObservations(observations, "baseline");
+  const faultObservations = phaseObservations(observations, "fault");
+  const recoveryObservations = phaseObservations(observations, "recovery");
+  const baselineHealthy =
+    baselineObservations.length > 0 &&
+    baselineObservations.every(
+      (observation) => observation.outcome === "forwarded_success",
+    );
+  const injectedFaultObserved = faultObservations.some(
+    (observation) =>
+      observation.outcome === expectedOutcome && observation.injected,
+  );
+  const recoveryObserved = recoveryObservations.some(
+    (observation) => observation.outcome === "forwarded_success",
+  );
+  const baseline = phase(
+    baselineObservations.length === 0
+      ? "inconclusive"
+      : baselineHealthy
+        ? "passed"
+        : "failed",
+    baselineObservations.length === 0
+      ? ["baseline_missing"]
+      : baselineHealthy
+        ? ["baseline_established"]
+        : ["baseline_unhealthy"],
+    baselineObservations.length === 0
+      ? "No baseline request was observed."
+      : baselineHealthy
+        ? "Baseline requests were forwarded successfully."
+        : "One or more baseline requests did not forward successfully.",
+  );
+  const fault = phase(
+    injectedFaultObserved ? "passed" : "inconclusive",
+    injectedFaultObserved
+      ? ["injected_fault_observed"]
+      : faultObservations.length === 0
+        ? ["fault_observation_missing"]
+        : ["configured_fault_not_observed"],
+    injectedFaultObserved
+      ? `The proxy recorded the configured ${scenarioName} fault.`
+      : "No request was proven to receive the configured injected fault.",
+  );
+  const recovery = phase(
+    recoveryObserved
+      ? "passed"
+      : recoveryObservations.length === 0
+        ? "inconclusive"
+        : "failed",
+    recoveryObserved
+      ? ["recovery_observed"]
+      : recoveryObservations.length === 0
+        ? ["recovery_observation_missing"]
+        : ["recovery_failed"],
+    recoveryObserved
+      ? "A request was forwarded successfully after the fault."
+      : recoveryObservations.length === 0
+        ? "No post-fault request was observed."
+        : "Recovery requests were observed but none succeeded.",
+  );
+  const phases = [baseline, fault, recovery];
+  const status = phases.some((item) => item.status === "failed")
+    ? "failed"
+    : phases.every((item) => item.status === "passed")
+      ? "passed"
+      : "inconclusive";
+  const reasons = phases.flatMap((item) => item.reasons);
+  return {
+    status,
+    baseline,
+    fault,
+    recovery,
+    reasons,
+    explanation: `${scenarioName} evaluation is ${status}: ${phases
+      .map((item) => item.explanation)
+      .join(" ")}`,
+    metrics,
+    warnings:
+      status === "inconclusive"
+        ? ["Available observations do not establish every required phase."]
+        : [],
+  };
+}
+
+type AttackScenarioId =
+  | "rpc-intermittent-failure"
+  | "rpc-rate-limit"
+  | "rpc-connection-failure"
+  | "rpc-malformed-response";
+
+type EvidenceRecordBase = Pick<
+  RpcBlackoutEvidence,
+  | "schemaVersion"
+  | "recordId"
+  | "executionId"
+  | "startedAt"
+  | "finishedAt"
+  | "terminalState"
+  | "observations"
+  | "evidenceDigest"
+  | "evaluation"
+  | "warnings"
+  | "limitations"
+>;
+
+function buildAttackEvidenceBase(
+  execution: EvidenceExecutionLike,
+  scenarioId: AttackScenarioId,
+  scenarioVersion: string,
+  configuration: EvidenceSchedule,
+  observations: readonly EvidenceObservation[],
+  evaluation: ExperimentEvaluation,
+  options: {
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  },
+  defaultLimitations: readonly string[],
+): EvidenceRecordBase {
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  const finishedAt = execution.finishedAt ?? startedAt;
+  const completedEvaluation =
+    execution.state === "completed"
+      ? evaluation
+      : {
+          ...evaluation,
+          status: "inconclusive" as const,
+          reasons: [...evaluation.reasons, "execution_not_completed"],
+          explanation: `${evaluation.explanation} Execution ended as ${execution.state} before a complete experiment could be established.`,
+          warnings: [
+            ...evaluation.warnings,
+            "Execution did not complete normally.",
+          ],
+        };
+  const digestInput = {
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    executionId: execution.executionId,
+    scenarioId,
+    scenarioVersion,
+    configuration,
+    startedAt,
+    finishedAt,
+    terminalState: execution.state,
+    observations,
+    evaluation: completedEvaluation,
+  };
+  return {
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    recordId: options.recordId ?? randomUUID(),
+    executionId: execution.executionId,
+    startedAt,
+    finishedAt,
+    terminalState: execution.state,
+    observations,
+    evidenceDigest: createHash("sha256")
+      .update(JSON.stringify(digestInput))
+      .digest("hex"),
+    evaluation: completedEvaluation,
+    warnings: options.warnings ?? [],
+    limitations: options.limitations ?? defaultLimitations,
+  };
 }
 
 function phaseObservations(
@@ -1178,28 +1466,65 @@ export function createRpcIntermittentFailureEvidence(
     readonly limitations?: readonly string[];
   } = {},
 ): RpcIntermittentFailureEvidence {
-  const blackoutLike = {
-    startOffsetMs: schedule.startOffsetMs,
-    durationMs: schedule.failureDurationMs,
-    ...(schedule.experimentDurationMs === undefined
-      ? {}
-      : { experimentDurationMs: schedule.experimentDurationMs }),
-  } satisfies Partial<BlackoutSchedule>;
-  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
-    ...options,
-    scenarioVersion:
-      options.scenarioVersion ?? RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+  if (
+    options.scenarioVersion !== undefined &&
+    options.scenarioVersion !== RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION
+  ) {
+    throw new EvidenceValidationError(
+      `Unsupported rpc-intermittent-failure scenario version: ${options.scenarioVersion}.`,
+    );
+  }
+  assertIntermittentFailureSchedule(schedule);
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  assertTimestamp(startedAt, "startedAt");
+  const cycleDuration =
+    schedule.failureDurationMs + schedule.recoveryIntervalMs;
+  const observations = normalizeScenarioProxyEvidence(records, (record) => {
+    const elapsed =
+      Date.parse(record.requestTimestamp ?? record.timestamp) -
+      Date.parse(startedAt);
+    if (elapsed < schedule.startOffsetMs) return "baseline";
+    const withinSchedule = elapsed - schedule.startOffsetMs;
+    const index = Math.floor(withinSchedule / cycleDuration);
+    if (index >= schedule.windowCount) return "recovery";
+    return withinSchedule % cycleDuration < schedule.failureDurationMs
+      ? "fault"
+      : "recovery";
   });
-  return {
-    ...evidence,
+  const lastFailureEnd =
+    schedule.startOffsetMs +
+    schedule.windowCount * schedule.failureDurationMs +
+    (schedule.windowCount - 1) * schedule.recoveryIntervalMs;
+  const evaluation = evaluateInjectedFault(
+    observations,
+    startedAt,
+    {
+      startOffsetMs: schedule.startOffsetMs,
+      durationMs: lastFailureEnd - schedule.startOffsetMs,
+    },
+    "injected_failure",
+    "RPC intermittent failure",
+  );
+  const base = buildAttackEvidenceBase(
+    execution,
+    "rpc-intermittent-failure",
+    RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+    schedule,
+    observations,
+    evaluation,
+    options,
+    [
+      "Evaluation proves proxy/request fault timing, not application resilience.",
+    ],
+  );
+  const evidence: RpcIntermittentFailureEvidence = {
+    ...base,
     scenarioId: "rpc-intermittent-failure",
     scenarioVersion: RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
     configuration: schedule,
-    warnings: options.warnings ?? evidence.warnings,
-    limitations: options.limitations ?? [
-      "Evaluation proves proxy/request fault timing, not application resilience.",
-    ],
-  } as RpcIntermittentFailureEvidence;
+  };
+  validateEvidence(evidence);
+  return evidence;
 }
 
 export function createRpcRateLimitEvidence(
@@ -1213,27 +1538,52 @@ export function createRpcRateLimitEvidence(
     readonly limitations?: readonly string[];
   } = {},
 ): RpcRateLimitEvidence {
-  const blackoutLike = {
-    startOffsetMs: 0,
-    durationMs: 1,
-    ...(schedule.experimentDurationMs === undefined
-      ? {}
-      : { experimentDurationMs: schedule.experimentDurationMs }),
-  } satisfies Partial<BlackoutSchedule>;
-  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
-    ...options,
-    scenarioVersion: options.scenarioVersion ?? RPC_RATE_LIMIT_SCENARIO_VERSION,
+  if (
+    options.scenarioVersion !== undefined &&
+    options.scenarioVersion !== RPC_RATE_LIMIT_SCENARIO_VERSION
+  ) {
+    throw new EvidenceValidationError(
+      `Unsupported rpc-rate-limit scenario version: ${options.scenarioVersion}.`,
+    );
+  }
+  assertRateLimitSchedule(schedule);
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  assertTimestamp(startedAt, "startedAt");
+  let throttled = false;
+  const observations = normalizeScenarioProxyEvidence(records, (record) => {
+    if (record.outcome === "rate_limited" && record.injected) {
+      throttled = true;
+      return "fault";
+    }
+    return throttled ? "recovery" : "baseline";
   });
-  return {
-    ...evidence,
+  const evaluation = evaluateInjectedFault(
+    observations,
+    startedAt,
+    { startOffsetMs: 0, durationMs: schedule.windowMs },
+    "rate_limited",
+    "RPC rate limit",
+  );
+  const base = buildAttackEvidenceBase(
+    execution,
+    "rpc-rate-limit",
+    RPC_RATE_LIMIT_SCENARIO_VERSION,
+    schedule,
+    observations,
+    evaluation,
+    options,
+    [
+      "Evaluation proves rate-limit behavior observed by the proxy, not application-level resilience.",
+    ],
+  );
+  const evidence: RpcRateLimitEvidence = {
+    ...base,
     scenarioId: "rpc-rate-limit",
     scenarioVersion: RPC_RATE_LIMIT_SCENARIO_VERSION,
     configuration: schedule,
-    warnings: options.warnings ?? evidence.warnings,
-    limitations: options.limitations ?? [
-      "Evaluation proves rate-limit behavior observed by the proxy, not application-level resilience.",
-    ],
-  } as RpcRateLimitEvidence;
+  };
+  validateEvidence(evidence);
+  return evidence;
 }
 
 export function createRpcConnectionFailureEvidence(
@@ -1247,28 +1597,52 @@ export function createRpcConnectionFailureEvidence(
     readonly limitations?: readonly string[];
   } = {},
 ): RpcConnectionFailureEvidence {
-  const blackoutLike = {
-    startOffsetMs: schedule.startOffsetMs,
-    durationMs: schedule.durationMs,
-    ...(schedule.experimentDurationMs === undefined
-      ? {}
-      : { experimentDurationMs: schedule.experimentDurationMs }),
-  } satisfies Partial<BlackoutSchedule>;
-  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
-    ...options,
-    scenarioVersion:
-      options.scenarioVersion ?? RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
-  });
-  return {
-    ...evidence,
+  if (
+    options.scenarioVersion !== undefined &&
+    options.scenarioVersion !== RPC_CONNECTION_FAILURE_SCENARIO_VERSION
+  ) {
+    throw new EvidenceValidationError(
+      `Unsupported rpc-connection-failure scenario version: ${options.scenarioVersion}.`,
+    );
+  }
+  assertConnectionFailureSchedule(schedule);
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  assertTimestamp(startedAt, "startedAt");
+  const observations = normalizeScenarioProxyEvidence(records, (record) =>
+    classifyScheduledRequest(
+      record,
+      startedAt,
+      schedule.startOffsetMs,
+      schedule.durationMs,
+    ),
+  );
+  const evaluation = evaluateInjectedFault(
+    observations,
+    startedAt,
+    schedule,
+    "injected_connection_failure",
+    "RPC connection failure",
+  );
+  const base = buildAttackEvidenceBase(
+    execution,
+    "rpc-connection-failure",
+    RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
+    schedule,
+    observations,
+    evaluation,
+    options,
+    [
+      "Evaluation proves proxy transport failure timing, not application resilience to network instability.",
+    ],
+  );
+  const evidence: RpcConnectionFailureEvidence = {
+    ...base,
     scenarioId: "rpc-connection-failure",
     scenarioVersion: RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
     configuration: schedule,
-    warnings: options.warnings ?? evidence.warnings,
-    limitations: options.limitations ?? [
-      "Evaluation proves proxy transport failure timing, not application resilience to network instability.",
-    ],
-  } as RpcConnectionFailureEvidence;
+  };
+  validateEvidence(evidence);
+  return evidence;
 }
 
 export function createRpcMalformedResponseEvidence(
@@ -1282,28 +1656,52 @@ export function createRpcMalformedResponseEvidence(
     readonly limitations?: readonly string[];
   } = {},
 ): RpcMalformedResponseEvidence {
-  const blackoutLike = {
-    startOffsetMs: schedule.startOffsetMs,
-    durationMs: schedule.durationMs,
-    ...(schedule.experimentDurationMs === undefined
-      ? {}
-      : { experimentDurationMs: schedule.experimentDurationMs }),
-  } satisfies Partial<BlackoutSchedule>;
-  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
-    ...options,
-    scenarioVersion:
-      options.scenarioVersion ?? RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
-  });
-  return {
-    ...evidence,
+  if (
+    options.scenarioVersion !== undefined &&
+    options.scenarioVersion !== RPC_MALFORMED_RESPONSE_SCENARIO_VERSION
+  ) {
+    throw new EvidenceValidationError(
+      `Unsupported rpc-malformed-response scenario version: ${options.scenarioVersion}.`,
+    );
+  }
+  assertMalformedResponseSchedule(schedule);
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  assertTimestamp(startedAt, "startedAt");
+  const observations = normalizeScenarioProxyEvidence(records, (record) =>
+    classifyScheduledRequest(
+      record,
+      startedAt,
+      schedule.startOffsetMs,
+      schedule.durationMs,
+    ),
+  );
+  const evaluation = evaluateInjectedFault(
+    observations,
+    startedAt,
+    schedule,
+    "injected_malformed_response",
+    "RPC malformed response",
+  );
+  const base = buildAttackEvidenceBase(
+    execution,
+    "rpc-malformed-response",
+    RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
+    schedule,
+    observations,
+    evaluation,
+    options,
+    [
+      "Evaluation proves malformed protocol behavior at the proxy boundary, not downstream application correctness.",
+    ],
+  );
+  const evidence: RpcMalformedResponseEvidence = {
+    ...base,
     scenarioId: "rpc-malformed-response",
     scenarioVersion: RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
     configuration: schedule,
-    warnings: options.warnings ?? evidence.warnings,
-    limitations: options.limitations ?? [
-      "Evaluation proves malformed protocol behavior at the proxy boundary, not downstream application correctness.",
-    ],
-  } as RpcMalformedResponseEvidence;
+  };
+  validateEvidence(evidence);
+  return evidence;
 }
 
 export function toReplayConfiguration(
@@ -1483,19 +1881,18 @@ export function replayConfiguration(value: unknown): ReplayRequest {
 }
 
 function configEqual(left: EvidenceSchedule, right: EvidenceSchedule): boolean {
-  const leftMap = left as unknown as Record<string, unknown>;
-  const rightMap = right as unknown as Record<string, unknown>;
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
   return (
-    leftMap.startOffsetMs === rightMap.startOffsetMs &&
-    leftMap.durationMs === rightMap.durationMs &&
-    leftMap.experimentDurationMs === rightMap.experimentDurationMs &&
-    leftMap.delayMs === rightMap.delayMs &&
-    leftMap.failureDurationMs === rightMap.failureDurationMs &&
-    leftMap.recoveryIntervalMs === rightMap.recoveryIntervalMs &&
-    leftMap.windowCount === rightMap.windowCount &&
-    leftMap.maxRequests === rightMap.maxRequests &&
-    leftMap.windowMs === rightMap.windowMs &&
-    leftMap.faultMode === rightMap.faultMode
+    leftEntries.length === rightEntries.length &&
+    leftEntries.every(
+      ([key, value], index) =>
+        key === rightEntries[index]?.[0] && value === rightEntries[index]?.[1],
+    )
   );
 }
 

@@ -1,15 +1,16 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, runCli } from "./cli.js";
 
-async function listenUpstream(): Promise<{
+async function listenUpstream(onRequest?: () => void): Promise<{
   readonly url: string;
   readonly close: () => Promise<void>;
 }> {
   const server: Server = createServer((request, response) => {
+    onRequest?.();
     request.resume();
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x7a69" }));
@@ -222,11 +223,11 @@ describe("blocklab CLI", () => {
           "--delay",
           "80",
           "--start-offset",
-          "100",
+          "750",
           "--duration",
-          "60",
+          "100",
           "--experiment-duration",
-          "260",
+          "1000",
           "--timeout",
           "2000",
           "--evidence-dir",
@@ -246,5 +247,247 @@ describe("blocklab CLI", () => {
     expect(evidence.scenarioId).toBe("rpc-latency");
     expect(evidence.configuration.delayMs).toBe(80);
     expect(evidence.evaluation.metrics.injectedRequestCount).toBe(1);
+  });
+
+  it.each([
+    [
+      "rpc-intermittent-failure",
+      [
+        "--start-offset",
+        "300",
+        "--failure-duration",
+        "100",
+        "--recovery-interval",
+        "100",
+        "--window-count",
+        "2",
+        "--experiment-duration",
+        "700",
+      ],
+    ],
+    [
+      "rpc-rate-limit",
+      [
+        "--max-requests",
+        "2",
+        "--window-ms",
+        "1000",
+        "--experiment-duration",
+        "2000",
+      ],
+    ],
+    [
+      "rpc-connection-failure",
+      [
+        "--fault-mode",
+        "premature-close",
+        "--start-offset",
+        "300",
+        "--duration",
+        "100",
+        "--experiment-duration",
+        "700",
+      ],
+    ],
+    [
+      "rpc-malformed-response",
+      [
+        "--fault-mode",
+        "mismatched-id",
+        "--start-offset",
+        "300",
+        "--duration",
+        "300",
+        "--experiment-duration",
+        "700",
+      ],
+    ],
+  ] as const)(
+    "runs, persists, and replays %s through the CLI",
+    async (scenario, scenarioOptions) => {
+      directory = await mkdtemp(join(tmpdir(), "blocklab-attack-cli-"));
+      upstream = await listenUpstream();
+      const output = capture();
+      const exitCode = await runCli(
+        [
+          "test",
+          scenario,
+          "--upstream",
+          upstream.url,
+          ...scenarioOptions,
+          "--timeout",
+          "2000",
+          "--evidence-dir",
+          directory,
+          "--json",
+        ],
+        output.dependencies,
+      );
+      expect(
+        exitCode,
+        `${output.stderr.join("")}\n${output.stdout.join("")}`,
+      ).toBe(EXIT_CODES.success);
+
+      const evidence = JSON.parse(output.stdout.join("")) as {
+        readonly executionId: string;
+        readonly scenarioId: string;
+        readonly scenarioVersion: string;
+        readonly terminalState: string;
+        readonly evaluation: {
+          readonly metrics: { readonly totalRequests: number };
+        };
+      };
+      expect(evidence.scenarioId).toBe(scenario);
+      expect(evidence.scenarioVersion).toBe("1.0.0");
+      expect(evidence.terminalState).toBe("completed");
+      expect(evidence.evaluation.metrics.totalRequests).toBeGreaterThan(0);
+      expect(await readdir(directory)).toContain(
+        `${evidence.executionId}.json`,
+      );
+
+      const replay = capture();
+      expect(
+        await runCli(
+          [
+            "replay",
+            evidence.executionId,
+            "--upstream",
+            upstream.url,
+            "--evidence-dir",
+            directory,
+            "--timeout",
+            "2000",
+            "--json",
+          ],
+          replay.dependencies,
+        ),
+      ).toBe(EXIT_CODES.success);
+      expect(
+        (JSON.parse(replay.stdout.join("")) as { readonly scenarioId: string })
+          .scenarioId,
+      ).toBe(scenario);
+      expect(await readdir(directory)).toHaveLength(2);
+    },
+  );
+
+  it.each([
+    [
+      "rpc-intermittent-failure",
+      ["--failure-duration", "0"],
+      EXIT_CODES.operation,
+    ],
+    ["rpc-rate-limit", ["--max-requests", "0"], EXIT_CODES.operation],
+    ["rpc-connection-failure", ["--duration", "0"], EXIT_CODES.operation],
+    ["rpc-malformed-response", ["--fault-mode", "unknown"], EXIT_CODES.usage],
+  ] as const)(
+    "rejects invalid %s configuration with its stable exit code",
+    async (scenario, invalidOptions, expectedExitCode) => {
+      directory = await mkdtemp(join(tmpdir(), "blocklab-invalid-cli-"));
+      upstream = await listenUpstream();
+      const result = capture();
+      const exitCode = await runCli(
+        [
+          "test",
+          scenario,
+          "--upstream",
+          upstream.url,
+          ...invalidOptions,
+          "--evidence-dir",
+          directory,
+        ],
+        result.dependencies,
+      );
+      expect(exitCode).toBe(expectedExitCode);
+      expect(result.stderr.join("")).toContain("Error:");
+      expect(await readdir(directory)).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    "rpc-intermittent-failure",
+    "rpc-rate-limit",
+    "rpc-connection-failure",
+    "rpc-malformed-response",
+  ] as const)("requires an explicit upstream for %s", async (scenario) => {
+    const result = capture();
+    expect(await runCli(["test", scenario], result.dependencies)).toBe(
+      EXIT_CODES.usage,
+    );
+    expect(result.stderr.join("")).toContain("--upstream");
+  });
+
+  it("supports human-readable output for malformed-response evidence", async () => {
+    directory = await mkdtemp(join(tmpdir(), "blocklab-human-cli-"));
+    upstream = await listenUpstream();
+    const result = capture();
+    expect(
+      await runCli(
+        [
+          "test",
+          "rpc-malformed-response",
+          "--upstream",
+          upstream.url,
+          "--start-offset",
+          "300",
+          "--duration",
+          "300",
+          "--experiment-duration",
+          "700",
+          "--timeout",
+          "2000",
+          "--evidence-dir",
+          directory,
+        ],
+        result.dependencies,
+      ),
+    ).toBe(EXIT_CODES.success);
+    expect(result.stdout.join("")).toContain(
+      "Scenario: rpc-malformed-response 1.0.0",
+    );
+    expect(result.stdout.join("")).toContain("injected requests: 1");
+    expect(result.stdout.join("")).toContain("Evidence:");
+  });
+
+  it("persists cancelled attack evidence and cleans up the CLI execution", async () => {
+    directory = await mkdtemp(join(tmpdir(), "blocklab-cancel-cli-"));
+    const controller = new AbortController();
+    upstream = await listenUpstream(() => controller.abort());
+    const result = capture();
+    const exitCode = await runCli(
+      [
+        "test",
+        "rpc-intermittent-failure",
+        "--upstream",
+        upstream.url,
+        "--start-offset",
+        "100",
+        "--failure-duration",
+        "10",
+        "--recovery-interval",
+        "10",
+        "--window-count",
+        "2",
+        "--experiment-duration",
+        "200",
+        "--evidence-dir",
+        directory,
+        "--json",
+      ],
+      { ...result.dependencies, signal: controller.signal },
+    );
+    expect(
+      exitCode,
+      `${result.stderr.join("")}\n${result.stdout.join("")}`,
+    ).toBe(EXIT_CODES.inconclusive);
+    const files = await readdir(directory);
+    expect(files).toHaveLength(1);
+    const evidence = JSON.parse(
+      await readFile(join(directory, files[0] ?? ""), "utf8"),
+    ) as {
+      readonly terminalState: string;
+      readonly evaluation: { readonly status: string };
+    };
+    expect(evidence.terminalState).toBe("cancelled");
+    expect(evidence.evaluation.status).toBe("inconclusive");
   });
 });

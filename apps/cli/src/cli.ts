@@ -258,7 +258,7 @@ function printHelp(output: (value: string) => void): void {
   output("  blocklab compare <execution-id-a> <execution-id-b> [--json]\n");
   output("  blocklab config [--json]\n\n");
   output(
-    "Options: --evidence-dir, --port, --delay, --start-offset, --duration, --experiment-duration, --timeout, --json\n",
+    "Options: --evidence-dir, --port, --delay, --fault-mode, --max-requests, --window-ms, --failure-duration, --recovery-interval, --window-count, --start-offset, --duration, --experiment-duration, --timeout, --json\n",
   );
   output(
     "\nAnon-RPC is browser-only: the CLI never imports or emulates the harness.\nRun the sample dApp (apps/sample-dapp) or Studio for Anon-RPC measurements.\n",
@@ -362,7 +362,7 @@ function printEvaluation(
     `Requests: ${metrics.totalRequests} (baseline ${metrics.requestsByPhase.baseline}, fault ${metrics.requestsByPhase.fault}, recovery ${metrics.requestsByPhase.recovery})\n`,
   );
   output(
-    `Forwarded successes: ${metrics.successfulForwardedRequests}; injected failures: ${metrics.injectedBlackoutFailures}; upstream errors: ${metrics.upstreamErrors}\n`,
+    `Forwarded successes: ${metrics.successfulForwardedRequests}; injected requests: ${metrics.injectedRequestCount}; blackout failures: ${metrics.injectedBlackoutFailures}; upstream errors: ${metrics.upstreamErrors}\n`,
   );
   output(
     `Latency: average ${metrics.averageLatencyMs ?? "n/a"}ms; median ${metrics.medianLatencyMs ?? "n/a"}ms\n`,
@@ -558,6 +558,17 @@ async function executeExperiment(
         });
       const baselineDelay =
         "startOffsetMs" in schedule ? schedule.startOffsetMs : 0;
+      const waitUntilElapsed = async (targetMs: number): Promise<void> => {
+        const startedAtMs = Date.parse(
+          experimentStartedAt ?? context.startedAt ?? new Date().toISOString(),
+        );
+        const remainingMs = targetMs - (Date.now() - startedAtMs);
+        if (remainingMs > 0) {
+          await new Promise<void>((resolvePromise) =>
+            setTimeout(resolvePromise, remainingMs),
+          );
+        }
+      };
       await request();
       if (scenario === "rpc-rate-limit") {
         const rateLimitSchedule = schedule as Extract<
@@ -571,11 +582,51 @@ async function executeExperiment(
         ) {
           await request();
         }
-      } else {
         await new Promise<void>((resolvePromise) =>
-          setTimeout(resolvePromise, baselineDelay),
+          setTimeout(resolvePromise, rateLimitSchedule.windowMs),
         );
-        await request();
+        if (!context.cancellationSignal.aborted) await request();
+      } else if (scenario === "rpc-intermittent-failure") {
+        const intermittentSchedule = schedule as Extract<
+          ScenarioSchedule,
+          { failureDurationMs: number }
+        >;
+        await waitUntilElapsed(baselineDelay);
+        for (
+          let index = 0;
+          index < intermittentSchedule.windowCount &&
+          !context.cancellationSignal.aborted;
+          index += 1
+        ) {
+          await request();
+          await new Promise<void>((resolvePromise) =>
+            setTimeout(resolvePromise, intermittentSchedule.failureDurationMs),
+          );
+          if (!context.cancellationSignal.aborted) await request();
+          if (index + 1 < intermittentSchedule.windowCount) {
+            await new Promise<void>((resolvePromise) =>
+              setTimeout(
+                resolvePromise,
+                intermittentSchedule.recoveryIntervalMs,
+              ),
+            );
+          }
+        }
+      } else {
+        await waitUntilElapsed(baselineDelay);
+        if (scenario === "rpc-connection-failure") {
+          try {
+            await request();
+          } catch (error) {
+            if (
+              proxy.evidence.at(-1)?.outcome !== "injected_connection_failure"
+            ) {
+              throw error;
+            }
+          }
+        } else {
+          await request();
+        }
         const faultDuration =
           "durationMs" in schedule
             ? schedule.durationMs
@@ -932,12 +983,19 @@ export async function runCli(
             const replayed = replayedSchedule as
               | Partial<ConnectionFailureSchedule>
               | undefined;
+            const requestedMode = option(parsed, "fault-mode");
+            if (
+              requestedMode !== undefined &&
+              requestedMode !== "connection-reset" &&
+              requestedMode !== "premature-close"
+            ) {
+              throw new CliError(
+                "--fault-mode for rpc-connection-failure must be connection-reset or premature-close.",
+              );
+            }
             return {
               faultMode:
-                replayed?.faultMode ??
-                (option(parsed, "fault-mode") === "premature-close"
-                  ? "premature-close"
-                  : "connection-reset"),
+                replayed?.faultMode ?? requestedMode ?? "connection-reset",
               startOffsetMs:
                 replayed?.startOffsetMs ??
                 integerOption(parsed, "start-offset", 100),
@@ -958,8 +1016,33 @@ export async function runCli(
             const replayed = replayedSchedule as
               | Partial<MalformedResponseSchedule>
               | undefined;
+            const requestedMode = option(parsed, "fault-mode");
+            const malformedModes: readonly MalformedResponseSchedule["faultMode"][] =
+              [
+                "invalid-json",
+                "missing-version",
+                "missing-result-and-error",
+                "missing-id",
+                "mismatched-id",
+                "invalid-structure",
+              ];
+            if (
+              requestedMode !== undefined &&
+              (typeof requestedMode !== "string" ||
+                !malformedModes.includes(
+                  requestedMode as MalformedResponseSchedule["faultMode"],
+                ))
+            ) {
+              throw new CliError(
+                "--fault-mode for rpc-malformed-response must be a supported malformed-response mode.",
+              );
+            }
             return {
-              faultMode: replayed?.faultMode ?? "invalid-json",
+              faultMode:
+                replayed?.faultMode ??
+                (typeof requestedMode === "string"
+                  ? (requestedMode as MalformedResponseSchedule["faultMode"])
+                  : "invalid-json"),
               startOffsetMs:
                 replayed?.startOffsetMs ??
                 integerOption(parsed, "start-offset", 100),

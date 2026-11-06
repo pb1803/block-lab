@@ -5,9 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   compareEvidence,
   createRpcBlackoutEvidence,
+  createRpcConnectionFailureEvidence,
+  createRpcIntermittentFailureEvidence,
   createRpcLatencyEvidence,
+  createRpcMalformedResponseEvidence,
+  createRpcRateLimitEvidence,
   EVIDENCE_SCHEMA_VERSION,
   type EvidenceObservation,
+  type EvidenceRecord,
   EvidenceValidationError,
   evaluateRpcBlackout,
   evaluateRpcLatency,
@@ -76,6 +81,39 @@ function completeEvidence(
     schedule,
     records,
   );
+}
+
+function attackRecord(
+  scenarioId: string,
+  offset: number,
+  outcome: EvidenceObservation["outcome"],
+  correlationId: string,
+  injected = false,
+): {
+  readonly executionId: string;
+  readonly scenarioId: string;
+  readonly timestamp: string;
+  readonly requestTimestamp: string;
+  readonly method: string;
+  readonly outcome: EvidenceObservation["outcome"];
+  readonly injected: boolean;
+  readonly latencyMs: number;
+  readonly correlationId: string;
+  readonly errorCategory?: string;
+} {
+  const timestamp = new Date(Date.parse(startedAt) + offset).toISOString();
+  return {
+    executionId: "attack-execution",
+    scenarioId,
+    timestamp,
+    requestTimestamp: timestamp,
+    method: "eth_chainId",
+    outcome,
+    injected,
+    latencyMs: offset % 31,
+    correlationId,
+    ...(injected ? { errorCategory: "injected_fault" } : {}),
+  };
 }
 
 describe("evidence validation and classification", () => {
@@ -319,6 +357,377 @@ describe("rpc-blackout evaluation and metrics", () => {
         "timed_out",
       ).terminalState,
     ).toBe("timed_out");
+  });
+});
+
+describe("ATTACK-02 through ATTACK-05 evidence", () => {
+  const attackEvidence = (): EvidenceRecord[] => [
+    createRpcIntermittentFailureEvidence(
+      {
+        executionId: "intermittent",
+        state: "completed",
+        startedAt,
+        finishedAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        startOffsetMs: 100,
+        failureDurationMs: 50,
+        recoveryIntervalMs: 50,
+        windowCount: 2,
+        experimentDurationMs: 300,
+      },
+      [
+        attackRecord(
+          "rpc-intermittent-failure",
+          0,
+          "forwarded_success",
+          "intermittent-baseline",
+        ),
+        attackRecord(
+          "rpc-intermittent-failure",
+          100,
+          "injected_failure",
+          "intermittent-fault-1",
+          true,
+        ),
+        attackRecord(
+          "rpc-intermittent-failure",
+          150,
+          "forwarded_success",
+          "intermittent-recovery-1",
+        ),
+        attackRecord(
+          "rpc-intermittent-failure",
+          200,
+          "injected_failure",
+          "intermittent-fault-2",
+          true,
+        ),
+        attackRecord(
+          "rpc-intermittent-failure",
+          250,
+          "forwarded_success",
+          "intermittent-recovery-2",
+        ),
+      ],
+    ),
+    createRpcRateLimitEvidence(
+      {
+        executionId: "rate-limit",
+        state: "completed",
+        startedAt,
+        finishedAt: "2026-01-01T00:00:01.000Z",
+      },
+      { maxRequests: 2, windowMs: 250, experimentDurationMs: 500 },
+      [
+        attackRecord(
+          "rpc-rate-limit",
+          0,
+          "forwarded_success",
+          "rate-baseline-1",
+        ),
+        attackRecord(
+          "rpc-rate-limit",
+          10,
+          "forwarded_success",
+          "rate-baseline-2",
+        ),
+        attackRecord("rpc-rate-limit", 20, "rate_limited", "rate-fault", true),
+        attackRecord(
+          "rpc-rate-limit",
+          300,
+          "forwarded_success",
+          "rate-recovery",
+        ),
+      ],
+    ),
+    createRpcConnectionFailureEvidence(
+      {
+        executionId: "connection-failure",
+        state: "completed",
+        startedAt,
+        finishedAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        faultMode: "connection-reset",
+        startOffsetMs: 100,
+        durationMs: 100,
+        experimentDurationMs: 300,
+      },
+      [
+        attackRecord(
+          "rpc-connection-failure",
+          0,
+          "forwarded_success",
+          "connection-baseline",
+        ),
+        attackRecord(
+          "rpc-connection-failure",
+          100,
+          "injected_connection_failure",
+          "connection-fault",
+          true,
+        ),
+        attackRecord(
+          "rpc-connection-failure",
+          200,
+          "forwarded_success",
+          "connection-recovery",
+        ),
+      ],
+    ),
+    createRpcMalformedResponseEvidence(
+      {
+        executionId: "malformed-response",
+        state: "completed",
+        startedAt,
+        finishedAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        faultMode: "mismatched-id",
+        startOffsetMs: 100,
+        durationMs: 100,
+        experimentDurationMs: 300,
+      },
+      [
+        attackRecord(
+          "rpc-malformed-response",
+          0,
+          "forwarded_success",
+          "malformed-baseline",
+        ),
+        attackRecord(
+          "rpc-malformed-response",
+          100,
+          "injected_malformed_response",
+          "malformed-fault",
+          true,
+        ),
+        attackRecord(
+          "rpc-malformed-response",
+          200,
+          "forwarded_success",
+          "malformed-recovery",
+        ),
+      ],
+    ),
+  ];
+
+  it("creates and validates scenario-specific evidence, outcomes, phases, and metrics", () => {
+    const records = attackEvidence();
+    expect(records.map((evidence) => evidence.scenarioId)).toEqual([
+      "rpc-intermittent-failure",
+      "rpc-rate-limit",
+      "rpc-connection-failure",
+      "rpc-malformed-response",
+    ]);
+    for (const evidence of records) {
+      expect(evidence.scenarioVersion).toBe("1.0.0");
+      expect(() => validateEvidence(evidence)).not.toThrow();
+      expect(evidence.evaluation.status).toBe("passed");
+      expect(evidence.evaluation.metrics).toMatchObject({
+        totalRequests: evidence.observations.length,
+        successfulForwardedRequests: expect.any(Number),
+        injectedRequestCount: evidence.observations.filter(
+          (observation) => observation.injected,
+        ).length,
+        upstreamErrors: 0,
+        injectedBlackoutFailures: 0,
+        recoverySuccessCount: expect.any(Number),
+      });
+      expect(evidence.observations.some((item) => item.phase === "fault")).toBe(
+        true,
+      );
+      expect(
+        evidence.observations.some((item) => item.phase === "recovery"),
+      ).toBe(true);
+    }
+    expect(records[0]?.evaluation.metrics.injectedRequestCount).toBe(2);
+    expect(records[0]?.observations.map((item) => item.phase)).toEqual([
+      "baseline",
+      "fault",
+      "recovery",
+      "fault",
+      "recovery",
+    ]);
+    expect(records[1]?.observations.map((item) => item.phase)).toEqual([
+      "baseline",
+      "baseline",
+      "fault",
+      "recovery",
+    ]);
+  });
+
+  it("rejects invalid scenario versions and invalid attack configurations", () => {
+    const [intermittent, rateLimit, connectionFailure, malformedResponse] =
+      attackEvidence();
+    for (const evidence of [
+      intermittent,
+      rateLimit,
+      connectionFailure,
+      malformedResponse,
+    ]) {
+      expect(() =>
+        validateEvidence({ ...evidence, scenarioVersion: "9.0.0" }),
+      ).toThrow(EvidenceValidationError);
+    }
+    expect(() =>
+      createRpcIntermittentFailureEvidence(
+        { executionId: "invalid", state: "completed" },
+        {
+          startOffsetMs: 100,
+          failureDurationMs: 50,
+          recoveryIntervalMs: 50,
+          windowCount: 2,
+          experimentDurationMs: 249,
+        },
+        [],
+      ),
+    ).toThrow(EvidenceValidationError);
+    expect(() =>
+      createRpcRateLimitEvidence(
+        { executionId: "invalid", state: "completed" },
+        { maxRequests: 0, windowMs: 250 },
+        [],
+      ),
+    ).toThrow(EvidenceValidationError);
+    expect(() =>
+      createRpcConnectionFailureEvidence(
+        { executionId: "invalid", state: "completed" },
+        {
+          faultMode: "reset" as never,
+          startOffsetMs: 0,
+          durationMs: 100,
+        },
+        [],
+      ),
+    ).toThrow(EvidenceValidationError);
+    expect(() =>
+      createRpcMalformedResponseEvidence(
+        { executionId: "invalid", state: "completed" },
+        {
+          faultMode: "unknown" as never,
+          startOffsetMs: 0,
+          durationMs: 100,
+        },
+        [],
+      ),
+    ).toThrow(EvidenceValidationError);
+    expect(intermittent?.scenarioId).toBe("rpc-intermittent-failure");
+    expect(rateLimit?.scenarioId).toBe("rpc-rate-limit");
+    expect(connectionFailure?.scenarioId).toBe("rpc-connection-failure");
+    expect(malformedResponse?.scenarioId).toBe("rpc-malformed-response");
+  });
+
+  it("round-trips every attack through persistence, replay, and comparison", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "blocklab-attacks-"));
+    try {
+      const original = attackEvidence();
+      for (const evidence of original) {
+        const path = join(directory, `${evidence.executionId}.json`);
+        await writeEvidence(path, evidence);
+        const loaded = await readEvidence(path);
+        expect(loaded).toEqual(evidence);
+        const replay = replayConfiguration(toReplayConfiguration(loaded));
+        expect(replay.scenarioId).toBe(evidence.scenarioId);
+        expect(replay.scenarioVersion).toBe(evidence.scenarioVersion);
+        expect(replay.configuration).toEqual(evidence.configuration);
+      }
+      const first = original[0];
+      const second = original[1];
+      if (first === undefined || second === undefined) {
+        throw new Error("Attack evidence fixtures were not created.");
+      }
+      expect(compareEvidence(first, first).comparable).toBe(true);
+      expect(compareEvidence(first, second).comparable).toBe(false);
+      if (second.scenarioId !== "rpc-rate-limit") {
+        throw new Error("Rate-limit evidence fixture was not created.");
+      }
+      const changedRetryPolicy = {
+        ...second,
+        configuration: {
+          ...second.configuration,
+          retryAfterSeconds: 3,
+        },
+      };
+      expect(compareEvidence(second, changedRetryPolicy).comparable).toBe(
+        false,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("distinguishes injected transport faults from observed upstream failures", () => {
+    const evidence = createRpcConnectionFailureEvidence(
+      {
+        executionId: "connection-outcomes",
+        state: "completed",
+        startedAt,
+        finishedAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        faultMode: "connection-reset",
+        startOffsetMs: 100,
+        durationMs: 100,
+        experimentDurationMs: 300,
+      },
+      [
+        attackRecord(
+          "rpc-connection-failure",
+          0,
+          "forwarded_success",
+          "outcome-baseline",
+        ),
+        attackRecord(
+          "rpc-connection-failure",
+          100,
+          "injected_connection_failure",
+          "outcome-injected",
+          true,
+        ),
+        attackRecord(
+          "rpc-connection-failure",
+          200,
+          "upstream_unavailable",
+          "outcome-upstream",
+        ),
+      ],
+    );
+    expect(
+      evidence.observations.map((observation) => observation.outcome),
+    ).toEqual([
+      "forwarded_success",
+      "injected_connection_failure",
+      "upstream_unavailable",
+    ]);
+    expect(evidence.evaluation.metrics).toMatchObject({
+      injectedRequestCount: 1,
+      injectedBlackoutFailures: 0,
+      upstreamErrors: 1,
+      successfulForwardedRequests: 1,
+      recoverySuccessCount: 0,
+    });
+    expect(evidence.evaluation.fault.status).toBe("passed");
+    expect(evidence.evaluation.recovery.status).toBe("failed");
+    expect(evidence.evaluation.status).toBe("failed");
+  });
+
+  it("keeps empty and interrupted scenario evidence honest", () => {
+    const partial = createRpcConnectionFailureEvidence(
+      { executionId: "partial", state: "cancelled", startedAt },
+      {
+        faultMode: "premature-close",
+        startOffsetMs: 100,
+        durationMs: 100,
+        experimentDurationMs: 300,
+      },
+      [],
+    );
+    expect(partial.observations).toHaveLength(0);
+    expect(partial.evaluation.status).toBe("inconclusive");
+    expect(partial.evaluation.metrics.averageLatencyMs).toBeUndefined();
+    expect(partial.evaluation.reasons).toContain("execution_not_completed");
   });
 });
 
