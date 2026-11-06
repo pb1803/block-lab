@@ -227,6 +227,27 @@ require an explicit loopback upstream.
 
 **Status:** Complete and validated by runner, evidence, and CLI tests.
 
+## ATTACK-02 through ATTACK-05 — Additional deterministic RPC fault patterns
+
+The broader fault suite is implemented on the same loopback `RpcProxy` and
+shared runner/evidence pipeline. The supported scenario IDs are:
+
+- `rpc-intermittent-failure` — periodic failure windows with deterministic
+  recovery intervals.
+- `rpc-rate-limit` — strict request quota with `Retry-After` throttling.
+- `rpc-connection-failure` — socket reset or premature close during a bounded
+  fault window.
+- `rpc-malformed-response` — invalid JSON and invalid JSON-RPC payloads during
+  the configured fault interval.
+
+Each variation keeps the same safety guarantees: loopback-only, read-only,
+request/response validation, cancellation cleanup, and redacted evidence. The
+proxy evidence records whether the fault was injected, which mode was active,
+and how the request recovered. These scenarios prove the transport behavior of the
+proxy; they do not prove application correctness or resilience by themselves.
+
+**Status:** Complete and validated by runner, evidence, and CLI tests.
+
 ## Phase 12 — Anon-RPC browser POC
 
 1. Use `@anon-rpc/browser-harness@0.4.0` in a browser-only fixture.

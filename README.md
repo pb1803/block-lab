@@ -24,16 +24,24 @@ BLOCKLAB is planned as a TypeScript/JavaScript pnpm workspace monorepo with a sh
 
 ## Project status
 
-The local inspector, loopback RPC proxy, deterministic `rpc-blackout` and
-`rpc-latency` experiments, evidence evaluator, replay/comparison APIs, and
-first-class CLI are implemented. The Anon-RPC browser integration is implemented in
-`@blocklab/browser-rpc` and used by `apps/sample-dapp` and `apps/anon-rpc-poc`.
-The Arkiv proof of concept lives in `apps/arkiv-poc` and has one verified real
-entity publication (tx, entity key, receipt and read-back in `docs/arkiv-poc.md`)
-plus a Studio history feature over the same contract. ENSv2, automatic failover,
-and hosted services remain out of scope for the current local workflow. Anon-RPC
-is browser-only: the CLI never imports or emulates the harness, and neither does
-it import the Arkiv SDK.
+The local inspector, loopback RPC proxy, deterministic `rpc-blackout`,
+`rpc-latency`, `rpc-intermittent-failure`, `rpc-rate-limit`,
+`rpc-connection-failure`, and `rpc-malformed-response` experiments, evidence
+evaluator, replay/comparison APIs, and first-class CLI are implemented. The
+Anon-RPC browser integration is implemented in `@blocklab/browser-rpc` and used by
+`apps/sample-dapp` and `apps/anon-rpc-poc`. The Arkiv proof of concept lives in
+`apps/arkiv-poc` and has one verified real entity publication (tx, entity key,
+receipt and read-back in `docs/arkiv-poc.md`) plus a Studio history feature over
+the same contract. ENSv2, automatic failover, and hosted services remain out of
+scope for the current local workflow. Anon-RPC is browser-only: the CLI never
+imports or emulates the harness, and neither does it import the Arkiv SDK.
+
+These fault scenarios are deliberately loopback-only, read-only, deterministic,
+and evidence-driven. They do not run arbitrary project code, add random jitter,
+route outside the local machine, or claim application-level resilience from a
+successful proxy fault alone. Each scenario records proxy-observed timing,
+status, recovery, and error classification so the user can distinguish proxy
+behavior from dApp behavior.
 
 The inspect-only Local Agent is available for Studio onboarding. Start it with
 an explicit project directory, pair with its short-lived code in Studio

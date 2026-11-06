@@ -102,6 +102,20 @@ does not execute project scripts, add jitter, support signing or transactions,
 or claim application-level resilience. Evidence records proxy-observed
 baseline, fault, and recovery timing only.
 
+## ATTACK-02 through ATTACK-05 deterministic RPC fault modes
+
+| ID | Priority | Task | Dependencies | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| ATTACK-02 | P0 | Implement deterministic `rpc-intermittent-failure` injection | RUN-04; RUN-08; CLI-04 | Failure windows fire only inside the configured cycle and recover deterministically | DONE |
+| ATTACK-03 | P0 | Implement deterministic `rpc-rate-limit` injection | RUN-04; RUN-08; CLI-04 | Quota enforcement, window reset, and `Retry-After` values are correct and predictable | DONE |
+| ATTACK-04 | P0 | Implement deterministic `rpc-connection-failure` injection | RUN-04; RUN-08; CLI-04 | Reset and premature-close modes fail only inside the bounded window and clean up correctly | DONE |
+| ATTACK-05 | P0 | Implement deterministic `rpc-malformed-response` injection | RUN-04; RUN-08; CLI-04 | Invalid JSON and invalid JSON-RPC structures are emitted only inside the configured window, with recovery afterward | DONE |
+
+These additional scenarios remain loopback-only, read-only, and evidence-backed.
+They are validated through the same runner, evidence, replay, and CLI paths as
+`rpc-blackout` and `rpc-latency`, but they do not claim dApp-level resilience and
+must not be used to justify arbitrary remote execution.
+
 ## Anon-RPC primary integration
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |

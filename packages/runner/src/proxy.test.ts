@@ -390,4 +390,239 @@ describe("local RPC proxy", () => {
     ).rejects.toThrow();
     await upstream.close();
   });
+
+  it("injects intermittent failures only inside the configured windows", async () => {
+    let now = 0;
+    const upstream = await listen(
+      createServer((request, response) => {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }));
+      }),
+    );
+    const proxy = new RpcProxy({
+      upstreamUrl: upstream.url,
+      now: () => now,
+      intermittent: {
+        startOffsetMs: 100,
+        failureDurationMs: 50,
+        recoveryIntervalMs: 50,
+        windowCount: 2,
+      },
+    });
+    const address = await proxy.start();
+
+    now = 99;
+    const outside = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_chainId",
+    });
+    now = 100;
+    const fault = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "eth_chainId",
+    });
+    now = 150;
+    const recovered = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "eth_chainId",
+    });
+    now = 200;
+    const secondFault = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "eth_chainId",
+    });
+
+    expect(outside.json.result).toBe("0x1");
+    expect(fault.json.error).toMatchObject({ code: -32097 });
+    expect(recovered.json.result).toBe("0x1");
+    expect(secondFault.json.error).toMatchObject({ code: -32097 });
+    expect(proxy.evidence.map((entry) => entry.outcome)).toEqual([
+      "forwarded_success",
+      "injected_failure",
+      "forwarded_success",
+      "injected_failure",
+    ]);
+    await proxy.close();
+    await upstream.close();
+  });
+
+  it("enforces rate limits with retry-after values and resets in the next window", async () => {
+    let now = 0;
+    const upstream = await listen(
+      createServer((request, response) => {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }));
+      }),
+    );
+    const proxy = new RpcProxy({
+      upstreamUrl: upstream.url,
+      now: () => now,
+      rateLimit: { maxRequests: 2, windowMs: 100, retryAfterSeconds: 2 },
+    });
+    const address = await proxy.start();
+
+    const first = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_chainId",
+    });
+    const second = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "eth_chainId",
+    });
+    const third = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "eth_chainId",
+    });
+    now = 150;
+    const fourth = await rpc(address.url, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "eth_chainId",
+    });
+
+    expect(first.json.result).toBe("0x1");
+    expect(second.json.result).toBe("0x1");
+    expect(third.status).toBe(429);
+    expect(third.json.error).toMatchObject({ code: -32005 });
+    expect(fourth.json.result).toBe("0x1");
+    expect(proxy.evidence.map((entry) => entry.outcome)).toEqual([
+      "forwarded_success",
+      "forwarded_success",
+      "rate_limited",
+      "forwarded_success",
+    ]);
+    await proxy.close();
+    await upstream.close();
+  });
+
+  it("fails connection-reset and premature-close mode before recovering", async () => {
+    for (const mode of ["connection-reset", "premature-close"] as const) {
+      let now = 0;
+      const upstream = await listen(
+        createServer((request, response) => {
+          request.resume();
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }),
+          );
+        }),
+      );
+      const proxy = new RpcProxy({
+        upstreamUrl: upstream.url,
+        now: () => now,
+        connectionFailure: {
+          faultMode: mode,
+          startOffsetMs: 100,
+          durationMs: 100,
+        },
+      });
+      const address = await proxy.start();
+
+      now = 99;
+      const before = await rpc(address.url, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_chainId",
+      });
+      now = 100;
+      await expect(
+        rpc(address.url, {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "eth_chainId",
+        }),
+      ).rejects.toThrow();
+      now = 200;
+      const after = await rpc(address.url, {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "eth_chainId",
+      });
+
+      expect(before.json.result).toBe("0x1");
+      expect(after.json.result).toBe("0x1");
+      expect(proxy.evidence.map((entry) => entry.outcome)).toEqual([
+        "forwarded_success",
+        "injected_connection_failure",
+        "forwarded_success",
+      ]);
+
+      await proxy.close();
+      await upstream.close();
+    }
+  });
+
+  it("returns every malformed-response mode in the fault window and recovers afterward", async () => {
+    for (const faultMode of [
+      "invalid-json",
+      "missing-version",
+      "missing-result-and-error",
+      "missing-id",
+      "mismatched-id",
+      "invalid-structure",
+    ] as const) {
+      let now = 0;
+      const upstream = await listen(
+        createServer((request, response) => {
+          request.resume();
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }),
+          );
+        }),
+      );
+      const proxy = new RpcProxy({
+        upstreamUrl: upstream.url,
+        now: () => now,
+        malformed: {
+          faultMode,
+          startOffsetMs: 100,
+          durationMs: 100,
+        },
+      });
+      const address = await proxy.start();
+
+      now = 99;
+      const before = await rpc(address.url, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_chainId",
+      });
+      now = 100;
+      const faulty = await fetch(address.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId" }),
+      });
+      const responseText = await faulty.text();
+      now = 200;
+      const after = await rpc(address.url, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "eth_chainId",
+      });
+
+      expect(before.json.result).toBe("0x1");
+      expect(responseText).toBeTruthy();
+      expect(faulty.status).toBe(200);
+      expect(after.json.result).toBe("0x1");
+      expect(
+        proxy.evidence.some(
+          (entry) => entry.outcome === "injected_malformed_response",
+        ),
+      ).toBe(true);
+
+      await proxy.close();
+      await upstream.close();
+    }
+  });
 });

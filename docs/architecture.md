@@ -33,6 +33,30 @@ core
 
 The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv follows the same isolation rule: the SDK is imported only by `apps/arkiv-poc` and by Studio's browser gateway module, never by the Node.js graph. Studio's history panel reuses the POC's proven contract after a real write/query/retrieve run existed (see [arkiv-poc.md](arkiv-poc.md)).
 
+### Supported local fault scenarios
+
+The loopback `RpcProxy` is the authoritative execution boundary for deterministic
+fault injection. The supported local scenarios are:
+
+- `rpc-blackout` — injects a bounded connection blackout inside a half-open
+  window and reports a JSON-RPC error without forwarding traffic.
+- `rpc-latency` — injects a fixed delay only inside the configured window; it is
+  deterministic, abortable, and measured separately from baseline and recovery.
+- `rpc-intermittent-failure` — fails during repeating windows with recovery
+  intervals, preserving the same loopback-only safety checks and evidence model.
+- `rpc-rate-limit` — enforces a request quota and emits a `Retry-After` header
+  with a capped retry window for throttled requests.
+- `rpc-connection-failure` — closes or resets the client socket during the fault
+  interval to simulate transport-layer disruption and then restores service.
+- `rpc-malformed-response` — emits invalid JSON or structurally invalid JSON-RPC
+  responses during the configured window and recovers afterward.
+
+Each scenario is read-only, local-only, and evaluated by the shared evidence
+engine. The proxy records whether the fault was applied, the configured window,
+request timing, upstream success or failure, cancellation, and observed latency.
+It does not prove application-level resilience or remote execution, and it does
+not accept unrestricted staging or arbitrary process execution.
+
 ### Studio comparison view
 
 `apps/studio/src/comparison` owns the read-only RPC comparison UI and its schema
