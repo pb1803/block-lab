@@ -161,8 +161,7 @@ panel adds exactly one write path (Publish), and only from an explicit click.
 ### History, details and compare
 
 - Search uses the indexed `DISCOVERY_ATTRIBUTES`: `experimentId`, `scenarioName`,
-  `status`. A genuine empty result is a distinct state from a failed query.
-- Details render every allowlisted field plus system metadata (owner, creator,
+  `status`. A genuine empty result is a distinct state from a failed query.- Details render every allowlisted field plus system metadata (owner, creator,
   entity key, created/updated/expiry blocks) and the digest disclaimer. Missing,
   expired (SDK `NoEntityFoundError`), malformed and unreadable records have
   distinct, honest states.
@@ -172,6 +171,14 @@ panel adds exactly one write path (Publish), and only from an explicit click.
 
 ### Verification
 
+- Provider refusals are classified by their EIP-1193 code first — `4001`
+  `user-rejected`, `4100`/`4900` `unauthorized`, `4901` `wrong-network` — walking
+  the `cause` chain, because viem wraps the wallet error and prints the calldata.
+  The code check runs **before** the HTTP-status patterns, which would otherwise
+  match the hex calldata itself (`…5334…` matches the `5xx` rule), so a wallet
+  authorization refusal used to surface as a bogus `network` failure. An
+  `unauthorized` refusal wrote nothing, so Studio re-enables Publish and says to
+  disconnect and connect again.
 - Wallet actions are decided in `walletView` (`showConnect` / `showDetect` /
   `showSwitch` / `canDisconnect`) and the DOM only obeys them, so the two cannot
   drift: `missing` → *Detect wallet*; `disconnected` → *Connect wallet*;

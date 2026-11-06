@@ -157,6 +157,17 @@ second publication and does not change ARK-07's status.
 
 - **Rejected in MetaMask**: reported as a user rejection; nothing was written and
   nothing is retried.
+- **Refused before signing (`4100`, `4900`, `4901`)**: the wallet refused the
+  request itself, so nothing was sent and the record is untouched. `4001` means
+  you declined; `4100` means the account is no longer authorized for this site
+  (observed once: the request was built correctly — same `from`, same Arkiv
+  contract, successful estimate — and MetaMask still answered
+  `The requested method and/or account has not been authorized by the user.`).
+  Fix: **Disconnect**, **Connect** (accepting the authorization popup), then
+  publish; an authorization refusal wrote nothing, so publishing again is not a
+  duplicate. `4900` is a wallet disconnected from its network; `4901` is a wrong
+  chain. Studio reports these as `[unauthorized]` / `[wrong-network]` with that
+  instruction rather than as a network failure.
 - **Error after submission**: Studio and the driver both re-query the entity once.
   If it exists, the run reports the key and **does not sign again**; if it does not,
   the run says nothing was written and stops. A blind retry is never performed.

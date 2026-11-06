@@ -18,6 +18,7 @@ export type WalletStatus =
 
 export type ErrorCategory =
   | "user-rejected"
+  | "unauthorized"
   | "wrong-network"
   | "network"
   | "sdk"

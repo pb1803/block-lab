@@ -141,7 +141,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
 | ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL |
 | ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | PARTIAL (expiresAt recorded; no observed expiry) |
-| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL (tooling + all non-signing gates verified live; the MetaMask signature is the one step not yet performed — see [docs/arkiv-ark07.md](docs/arkiv-ark07.md)) |
+| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL (tooling + all non-signing gates verified live; the MetaMask signature is the one step not yet performed — first attempt was refused with `4100`, diagnosis and fix in the log below; see [docs/arkiv-ark07.md](docs/arkiv-ark07.md)) |
 | ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | PARTIAL (implemented in Studio; empty/expired states unit-tested, live-queried only through the POC harness) |
 | ARK-09 | P1 | Implement validated local replay | ARK-08; CLI-05 | Retrieved definitions are validated before local execution | PARTIAL (retrieval + canonical revalidation DONE; execution in Studio is deliberately out of scope) |
 | ARK-10 | P1 | Complete evidence documentation | ARK-09 | Schema, friction, reach, rationale, and usage docs contain real evidence | DONE (architecture, Studio README, arkiv-poc.md, plan/backlog) |
@@ -183,6 +183,22 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   SHA-256 `410e3d5c…38f4d`, byte-identical to the reconstructed canonical record,
   owner==creator==signer, expiry +302400 blocks, receipt success at block 269199,
   gas 0.000209105 tGLM). That control re-verifies ARK-03, not a second write.
+- **ARK-07 diagnosis + fix (2026-11-06)**: the first real publication attempt was
+  refused by MetaMask with `The requested method and/or account has not been
+  authorized by the user.` Diagnosed read-only (capture-and-block CDP interceptor,
+  nothing sent): the request itself was correct — `from` = the connected
+  `0xd431…2ebe9`, `to` = Arkiv `0x4400…0044`, gas `250902`, `eth_estimateGas`
+  succeeded, `eth_accounts`/`wallet_getPermissions`/`eth_chainId` all correct for
+  origin `http://localhost:5178`, so this was not account/chain drift and not a
+  provider mismatch. The real defect was downstream: `classifyError` only knew
+  `4001`, and its HTTP-status regex `5\d{2}` matched the hex calldata (the address
+  contains `533`), so every provider code — including `4100` — was reported as a
+  bogus `network` failure. Classification now reads EIP-1193 codes off the `cause`
+  chain first (`4100`/`4900` → `unauthorized`, `4901` → `wrong-network`), before any
+  message pattern, and `unauthorized` states that nothing was sent and to
+  disconnect/connect again. 6 regression tests; confirmed in the live Studio
+  (`[unauthorized] …` rendered, Publish re-enabled). 339 tests / 34 files, 25/25
+  browser checks, lint/typecheck/build clean.
 - **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
 - **Phase 15 regression fix (2026-11-06)**: the Connect control was rendered but
   hidden for every status except `missing`, so a detected-but-unauthorized wallet

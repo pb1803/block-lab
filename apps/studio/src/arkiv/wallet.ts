@@ -133,21 +133,75 @@ export function attachWalletEvents(
 }
 
 /**
+ * EIP-1193 codes a wallet uses to refuse a request, before any signature.
+ * viem wraps the provider error, so the code sits up the `cause` chain.
+ */
+const PROVIDER_CODES: ReadonlySet<number> = new Set([4001, 4100, 4900, 4901]);
+
+/** First recognised provider code on the error itself or up its `cause` chain. */
+function providerCode(error: unknown): number | null {
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 8; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "number" && PROVIDER_CODES.has(code)) return code;
+    if (typeof code === "string" && /^\d+$/.test(code)) {
+      const parsed = Number(code);
+      if (PROVIDER_CODES.has(parsed)) return parsed;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/**
  * Classifies an error thrown by the wallet or the Arkiv SDK. A wallet rejection
  * is never reported as a network failure or as a written entity.
  */
 export function classifyError(error: unknown): StudioError {
   if (error instanceof Error) {
-    const code = (error as { code?: unknown; cause?: unknown }).code;
-    if (code === 4001 || code === "4001") {
-      return {
-        category: "user-rejected",
-        message: "The transaction was rejected in the wallet.",
-      };
+    // Provider codes first: the message below carries hex calldata, so the
+    // numeric patterns used for HTTP failures would match it by accident.
+    switch (providerCode(error)) {
+      case 4001:
+        return {
+          category: "user-rejected",
+          message: "The transaction was rejected in the wallet.",
+        };
+      case 4100:
+        return {
+          category: "unauthorized",
+          message:
+            "The wallet has not authorized this account for this site, so it refused " +
+            "the request before signing. Nothing was sent: disconnect and connect the " +
+            "wallet again, then publish.",
+        };
+      case 4900:
+        return {
+          category: "unauthorized",
+          message:
+            "The wallet is disconnected from its network. Nothing was sent: reconnect " +
+            "the wallet, then publish.",
+        };
+      case 4901:
+        return {
+          category: "wrong-network",
+          message:
+            "The wallet is not on the network this write needs. Nothing was sent: " +
+            "switch to Rabdi, then publish.",
+        };
     }
     const message = error.message;
     if (message.startsWith("User rejected")) {
       return { category: "user-rejected", message };
+    }
+    if (/has not been authorized/i.test(message)) {
+      return {
+        category: "unauthorized",
+        message:
+          "The wallet has not authorized this account for this site, so it refused " +
+          "the request before signing. Nothing was sent: disconnect and connect the " +
+          "wallet again, then publish.",
+      };
     }
     if (error.name === "NoEntityFoundError") {
       return {

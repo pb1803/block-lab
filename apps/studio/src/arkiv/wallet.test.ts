@@ -119,4 +119,63 @@ describe("classifyError", () => {
     );
     expect(classifyError(new Error("boom")).category).toBe("sdk");
   });
+
+  // The observed ARK-07 failure: viem wraps the provider refusal and prints the
+  // calldata, whose hex digits contain `5xx` and so used to classify as network.
+  const viemAuthorizationError = () => {
+    const cause = Object.assign(
+      new Error(
+        "The requested method and/or account has not been authorized by the user.",
+      ),
+      { code: 4100 },
+    );
+    const wrapper = new Error(
+      "The requested method and/or account has not been authorized by the user.\n\n" +
+        "Request Arguments:\n  from: 0xd431714db82331b07697ea4675334c3af6d2ebe9\n" +
+        "  to: 0x4400000000000000000000000000000000000044\n  gas: 250902\n" +
+        "  data: 0x4965004400000000000000000000000000000000000000000000000000000000",
+      { cause },
+    );
+    wrapper.name = "TransactionExecutionError";
+    return wrapper;
+  };
+
+  it("reports a 4100 refusal as unauthorized, not as a network failure", () => {
+    const classified = classifyError(viemAuthorizationError());
+    expect(classified.category).toBe("unauthorized");
+    expect(classified.message).toMatch(/disconnect and connect/i);
+  });
+
+  it("reads a provider code given as a string", () => {
+    const error = Object.assign(new Error("nope"), { code: "4100" });
+    expect(classifyError(error).category).toBe("unauthorized");
+  });
+
+  it("maps a disconnected wallet (4900) to unauthorized", () => {
+    const error = Object.assign(new Error("disconnected"), { code: 4900 });
+    expect(classifyError(error).category).toBe("unauthorized");
+  });
+
+  it("maps an unsupported chain (4901) to wrong-network", () => {
+    const error = Object.assign(new Error("chain"), { code: 4901 });
+    expect(classifyError(error).category).toBe("wrong-network");
+  });
+
+  it("recognises the authorization wording without a code", () => {
+    const error = new Error(
+      "The requested method and/or account has not been authorized by the user.",
+    );
+    expect(classifyError(error).category).toBe("unauthorized");
+  });
+
+  it("still reports a genuine provider failure as network", () => {
+    const cause = Object.assign(new Error("Internal JSON-RPC error."), {
+      code: -32603,
+    });
+    const wrapper = new Error(
+      "estimate gas failed\n  from: 0xd431714db82331b07697ea4675334c3af6d2ebe9",
+      { cause },
+    );
+    expect(classifyError(wrapper).category).toBe("network");
+  });
 });
