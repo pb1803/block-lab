@@ -287,7 +287,7 @@ meaningfully distinguished.
 | UI-06 | P1 | Add Arkiv history view | ARK-08; UI-01 | Records are read from Arkiv, not mocked | PARTIAL (Studio history panel implemented; live reads exercised by the verified POC entity, mock-limited in browser checks) |
 | UI-07 | P1 | Add Anon-RPC comparison view | ANON-08; UI-01 | Browser measurements and exclusions are visible | DONE (Phase 13, comparison panel; exported via studio-view-check/export-check) |
 | UI-08 | P0 | Audit Studio and define redesign blueprint | UI-06; UI-07 | Current screens, boundaries, hybrid architecture, and attack catalogue are documented without rewriting the app | DONE (2026-11-06) |
-| UI-09 | P0 | Build design system and application shell | UI-08 | Navigation, tokens, responsive shell, and accessible page states are implemented | TODO |
+| UI-09 | P0 | Build design system and application shell | UI-08 | Navigation, tokens, responsive shell, and accessible page states are implemented | DONE (2026-11-06; Arkiv/comparison remain under Evidence Vault, unfinished workflows are explicit unavailable states) |
 | UI-10 | P0 | Build Overview and Projects workflows | UI-09; INS-07 | Project context and evidence-labelled inspection are usable in Studio | TODO |
 | UI-11 | P0 | Build Attack Lab and scenario configuration | UI-09; RUN-10 | Verified scenarios have explicit preflight and safety controls | TODO |
 | UI-12 | P0 | Build experiment execution and live monitoring | UI-11; DEPLOY-01 | Actual runner events drive the timeline through the agent boundary | TODO |

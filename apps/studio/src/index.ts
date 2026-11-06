@@ -57,3 +57,12 @@ export {
   type StudioRpcSnapshot,
   type ViemProbeResult,
 } from "./comparison/index.js";
+export {
+  hashForRoute,
+  mountStudioShell,
+  routeFromHash,
+  type StudioNavigationItem,
+  type StudioRoute,
+  type StudioShellMount,
+  studioNavigation,
+} from "./shell.js";

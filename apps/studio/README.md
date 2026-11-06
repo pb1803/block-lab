@@ -7,6 +7,8 @@ anything itself, and never runs anonymous workers.
 ## Layout
 
 - `src/index.ts` — the application shell (`studioShell`).
+- `src/shell.ts` — the route-aware application shell, navigation, honest
+  unavailable states, and reusable visual primitives used by the app entry.
 - `src/comparison/` — the read-only RPC comparison view:
   - `model.ts` — schema, validation, and normalization of the snapshot
     (`parseStudioSnapshot`, `createStudioSnapshot`, `StudioRpcSnapshot`).
@@ -115,6 +117,11 @@ rendered table, and asserts that zero network requests were made during the
 export.
 
 ## Arkiv experiment history (added in Phase 15)
+
+The UI-09 shell presents Arkiv history and comparison under the Evidence Vault
+route. The other destinations intentionally show honest unavailable states
+until their Local Agent and runner workflows are implemented. The shell never
+claims that a Local Agent is connected.
 
 `src/arkiv/` adds wallet-mediated publish, history search, record details and
 record comparison to Studio. The comparison panel stays **read-only**; the Arkiv

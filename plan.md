@@ -483,6 +483,15 @@ The audit confirms that the current Studio is a functional Arkiv history and
 RPC comparison surface, not yet the Phase 17 product shell. No UI rewrite or
 local-agent bridge was started in UI-08.
 
+### UI-09 status (2026-11-06)
+
+The Studio now has a route-aware dark application shell, responsive sidebar
+navigation, shared visual tokens, accessible status indicators, an honest
+Overview page, and an Evidence Vault route containing the existing Arkiv and
+comparison surfaces. Projects, Attack Lab, Experiments, Network Intelligence,
+and Settings are intentionally marked unavailable until their safety boundaries
+and data contracts are implemented. No Local Agent was added.
+
 ## Phase 18 — Hardening and security review
 
 1. Run all flows from a clean checkout.

@@ -28,15 +28,25 @@ import {
   hasEip1193Provider,
   switchToRabdi,
 } from "./arkiv/wallet.js";
+import { mountStudioShell, routeFromHash } from "./shell.js";
 
-const walletError = document.querySelector<HTMLElement>("#wallet-error");
-const panel = document.querySelector<HTMLElement>("#studio-arkiv");
-const comparePanel = document.querySelector<HTMLElement>("#studio-compare");
+const root = document.querySelector<HTMLElement>("#studio-root");
 
-if (panel === null || comparePanel === null) {
-  throw new Error("Studio markup is missing #studio-arkiv or #studio-compare.");
+if (root === null) {
+  throw new Error("Studio markup is missing #studio-root.");
 }
 
+const shell = mountStudioShell(root, routeFromHash(window.location.hash));
+const walletError = document.createElement("div");
+walletError.className = "wallet-error";
+walletError.setAttribute("role", "alert");
+walletError.hidden = true;
+shell.history.prepend(walletError);
+const panel = shell.history.querySelector<HTMLElement>("#studio-arkiv");
+const comparePanel = shell.compare;
+if (panel === null) {
+  throw new Error("Studio shell is missing the Arkiv history mount point.");
+}
 let gateway: ArkivGateway | null =
   ARKIV_ACCESS_KEY === ""
     ? null
@@ -48,14 +58,14 @@ let detachWalletEvents: (() => void) | undefined;
 const controller = new ArkivController({ gateway: () => gateway });
 
 function showWalletError(error: unknown): void {
-  if (walletError === null) return;
   const classified = classifyError(error);
   walletError.textContent = `[${classified.category}] ${classified.message}`;
+  walletError.hidden = false;
 }
 
 function clearWalletError(): void {
-  if (walletError === null) return;
   walletError.textContent = "";
+  walletError.hidden = true;
 }
 
 function rebuildGateway(

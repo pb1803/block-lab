@@ -3,36 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BLOCKLAB Studio — Arkiv history</title>
+    <title>BLOCKLAB Studio</title>
   </head>
   <body>
-    <main class="page">
-      <header class="page-head">
-        <h1>BLOCKLAB Studio <span class="muted">/ Arkiv experiment history</span></h1>
-        <p class="muted">
-          This surface is read-only except for the explicit, user-approved Publish
-          action. Signing happens inside your wallet; Studio never sees a private
-          key, and it never switches networks on its own.
-        </p>
-      </header>
-
-      <div id="wallet-error" class="wallet-error" role="alert"></div>
-      <div id="studio-arkiv"></div>
-
-      <section class="sr-panel">
-        <h3>Compare records</h3>
-        <p class="muted">
-          Compare one Arkiv record (entity key) against another, or against a
-          pasted local BLOCKLAB record. Local records are always labelled "local".
-        </p>
-        <div id="studio-compare"></div>
-      </section>
-
-      <footer class="muted">
-        Network: Rabdi testnet (chain id 0x76edaf, tGLM, 2&nbsp;s blocks). The
-        evidence digest is a hash of local evidence only.
-      </footer>
-    </main>
+    <div id="studio-root"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
