@@ -62,6 +62,23 @@ describe("ownershipRole", () => {
     expect(ownershipRole(snapshot({ owner: OTHER }), OTHER).isOwner).toBe(true);
   });
 
+  it("recognises the owner through a lowercased wallet account", () => {
+    // MetaMask reports accounts lowercased; the chain reports them checksummed.
+    const role = ownershipRole(snapshot(), OWNER.toLowerCase() as Address);
+    expect(role.isOwner).toBe(true);
+    expect(role.isCreator).toBe(true);
+    // Mixed case in either direction must not register as a different address.
+    expect(
+      ownershipRole(snapshot({ owner: OWNER.toLowerCase() as Address }), OWNER)
+        .isOwner,
+    ).toBe(true);
+    // ... and a genuinely different address still must.
+    expect(
+      ownershipRole(snapshot({ owner: OTHER.toLowerCase() as Address }), OWNER)
+        .isOwner,
+    ).toBe(false);
+  });
+
   it("says so when nothing is connected", () => {
     expect(ownershipRole(snapshot(), undefined).summary).toMatch(/No account/);
   });
@@ -123,6 +140,24 @@ describe("transferBlockReason", () => {
     expect(
       transferBlockReason({ ...base, wallet: connected(), newOwner: OWNER })
         ?.message,
+    ).toMatch(/already the owner/);
+  });
+
+  it("accepts a lowercased signer and a lowercased recipient", () => {
+    expect(
+      transferBlockReason({
+        ...base,
+        wallet: connected(OWNER.toLowerCase() as Address),
+        newOwner: OTHER.toLowerCase(),
+      }),
+    ).toBeNull();
+    // Same owner in another case still counts as "already the owner".
+    expect(
+      transferBlockReason({
+        ...base,
+        wallet: connected(),
+        newOwner: OWNER.toLowerCase(),
+      })?.message,
     ).toMatch(/already the owner/);
   });
 

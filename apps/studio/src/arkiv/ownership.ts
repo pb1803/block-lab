@@ -76,6 +76,21 @@ export function isZeroAddress(address: Address): boolean {
 }
 
 /**
+ * Address equality that ignores case. The wallet supplies lowercase accounts
+ * while a record reports the checksummed form, so a raw `===` marks the owner as
+ * a stranger.
+ */
+export function sameAddress(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return false;
+  const a = normalizeAddress(left);
+  const b = normalizeAddress(right);
+  return a !== null && b !== null && a === b;
+}
+
+/**
  * Whether the connected account may transfer this entity, and why not. The
  * engine enforces this too (`NotOwner`); checking first turns a wasted wallet
  * popup into a plain explanation.
@@ -88,8 +103,8 @@ export function ownershipRole(
   readonly isCreator: boolean;
   readonly summary: string;
 } {
-  const isOwner = signer !== undefined && signer === snapshot.owner;
-  const isCreator = signer !== undefined && signer === snapshot.creator;
+  const isOwner = sameAddress(signer, snapshot.owner);
+  const isCreator = sameAddress(signer, snapshot.creator);
   if (signer === undefined) {
     return { isOwner, isCreator, summary: "No account connected." };
   }
@@ -158,7 +173,8 @@ export function transferBlockReason(input: {
   }
   if (!ownershipRole(snapshot, wallet.address).isOwner) {
     return {
-      category: "wrong-network",
+      // Not a network problem: the connected account is simply not the owner.
+      category: "validation",
       message: `The connected account ${wallet.address} is not the owner ${snapshot.owner}. A transfer must be signed by the current owner.`,
     };
   }
@@ -175,7 +191,7 @@ export function transferBlockReason(input: {
       message: "The zero address cannot receive an entity.",
     };
   }
-  if (newOwner === snapshot.owner) {
+  if (sameAddress(newOwner, snapshot.owner)) {
     return {
       category: "validation",
       message: "The recipient is already the owner.",
@@ -243,17 +259,17 @@ export function compareOwnership(
     },
     {
       name: "the owner is now the intended recipient",
-      ok: after.owner === expectedNewOwner,
+      ok: sameAddress(after.owner, expectedNewOwner),
       detail: `${after.owner} (expected ${expectedNewOwner})`,
     },
     {
       name: "the owner actually changed",
-      ok: after.owner !== before.owner,
+      ok: !sameAddress(after.owner, before.owner),
       detail: `was ${before.owner}`,
     },
     {
       name: "the creator did not change",
-      ok: after.creator === before.creator,
+      ok: sameAddress(after.creator, before.creator),
       detail: after.creator,
     },
     {

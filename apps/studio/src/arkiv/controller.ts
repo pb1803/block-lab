@@ -19,6 +19,7 @@ import type { OwnershipSnapshot } from "./ownership.js";
 import {
   compareOwnership,
   normalizeAddress,
+  sameAddress,
   transferBlockReason,
 } from "./ownership.js";
 import { findSensitiveContent, verifyReadBack } from "./record.js";
@@ -327,7 +328,7 @@ export class ArkivController {
         );
         return;
       }
-      if (signer !== undefined && fresh.owner !== signer) {
+      if (signer !== undefined && !sameAddress(fresh.owner, signer)) {
         this.#emit(
           {
             type: "transfer-failed",
@@ -395,7 +396,7 @@ export class ArkivController {
       const after = await gateway
         .readOwnership(before.entityKey)
         .catch(() => null);
-      const moved = after !== null && after.owner === newOwner;
+      const moved = after !== null && sameAddress(after.owner, newOwner);
       this.#emit(
         {
           type: "transfer-failed",
@@ -522,7 +523,7 @@ function compareBefore(
   before: OwnershipSnapshot,
   fresh: OwnershipSnapshot,
 ): string | null {
-  if (fresh.owner === before.owner) {
+  if (sameAddress(fresh.owner, before.owner)) {
     if (fresh.creator !== before.creator) {
       return `The creator changed from ${before.creator} to ${fresh.creator}; preview again.`;
     }

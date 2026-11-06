@@ -334,6 +334,17 @@ describe("transfer — staging", () => {
     expect(controller.state.transfer.newOwner).toBe(NEW_OWNER);
   });
 
+  it("accepts the lowercase account a wallet actually reports", async () => {
+    const { gateway } = fakeGateway();
+    const controller = new ArkivController({ gateway });
+    controller.walletConnected(OWNER.toLowerCase() as never, RABDI as never);
+    await controller.previewTransfer(
+      ENTITY_KEY as never,
+      NEW_OWNER.toLowerCase(),
+    );
+    expect(controller.state.transfer.phase).toBe("preview");
+  });
+
   it("blocks a wallet that is not the owner", async () => {
     const { gateway } = fakeGateway();
     const controller = new ArkivController({ gateway });

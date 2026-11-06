@@ -1,6 +1,6 @@
 # ARK-05 — owner, creator and ownership transfer
 
-**Status: PARTIAL — entity created, transfer pending.** The mechanism is fully
+**Status: PARTIAL — entity created, transfer preview-staged.** The mechanism is fully
 verified from the installed SDK, fully implemented and unit-tested in Studio, and
 stage 1 (creation with A) is executed and independently verified, stage 2 (the
 transfer) is not. **No transfer has been broadcast yet**, so the two-wallet
@@ -271,10 +271,53 @@ pnpm --filter @blocklab/studio run verify:entity --   --entity 0x2b81eff4711b9f5
 `--record` adds the byte-identity check; without it that line reports FAIL by
 design ("no canonical record supplied"), which is why it is not shown as evidence.
 
-### Stage 2 — transfer to B: NOT STARTED
+### Stage 2 — transfer to B: PREVIEW STAGED, awaiting authorization
 
-Awaiting separate authorization. Destination stays
-`0xAd797f58aFD3265C00504382171eC0818262D3ca` (`9.999441629 tGLM`, EOA).
+Studio was driven against the live entity: opened by key, B pasted, **Preview
+transfer** pressed. Nothing was signed, nothing was sent, no second entity exists.
+The preview was verified a second time from a separate process.
+
+Rendered preview (verbatim from the panel):
+
+| Row | Value |
+|---|---|
+| Entity | `0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb` |
+| Creator (unchanged) | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` |
+| Owner now | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` |
+| Owner after | `0xAd797f58aFD3265C00504382171eC0818262D3ca` |
+| Signer (must be the owner) | `0xd431714db82331b07697ea4675334c3af6d2ebe9` |
+| Your role | owner and creator |
+| Expiry (unchanged) | block `588211` |
+| Payload (unchanged) | 496 bytes retained |
+
+All four caveats are shown by the panel: the creator never changes and only the
+owner does; the recipient does not accept (the transfer completes when mined); the
+account loses owner rights afterwards and can no longer transfer or patch the
+entity; expiry and payload are untouched and the entity stays world-readable.
+
+Independent checks at head `286104` (read-only, separate process, all PASS):
+
+| Check | Result |
+|---|---|
+| Current owner is A | `0xD431…2EBE9` |
+| Creator is A | `0xD431…2EBE9` |
+| Proposed owner is B, and is not A | `0xAd79…D3ca`, distinct |
+| Signer will be A | connected account `0xd431…2ebe9` (lowercase form of the owner) |
+| Expiry unchanged | `588211`, **not expired** (`head + 302107` blocks left) |
+| Payload unchanged | 496 bytes, SHA-256 `dfe87f08…3391f9d`, identical to the creation |
+| No stale ownership state | owner still A on a fresh read; A nonce `latest == pending` (3/3), so nothing is stuck; balance still `4.999593659` tGLM |
+
+**Defect found and fixed while preparing this preview:** every address comparison
+used `===`, but a wallet reports its account lowercased while the chain reports the
+checksummed form. The owner was therefore told "you are neither the owner nor the
+creator" and the preview refused. Comparisons now run through `sameAddress`
+(case-insensitive, viem-checked), the not-owner reason is categorised `validation`
+instead of `wrong-network`, and four regression tests cover the real lowercase
+shape plus a lowercased read-back and recipient. The DOM test now connects with a
+lowercase account, which fails without the fix.
+
+Transfer tx, `OwnershipTransferred` and the negative check stay pending: no
+`changeOwnership` has been called.
 
 ## Automation vs chain evidence
 

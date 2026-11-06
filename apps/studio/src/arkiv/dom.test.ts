@@ -566,7 +566,11 @@ describe("mountStudioArkiv — ownership transfer", () => {
       loadLocalRecord: () => null,
       openByKey: () => null,
     });
-    controller.walletConnected(SIGNER as never, RABDI_CHAIN_ID_HEX as never);
+    // Real wallets report lowercase accounts; the entity stores checksummed ones.
+    controller.walletConnected(
+      SIGNER.toLowerCase() as never,
+      RABDI_CHAIN_ID_HEX as never,
+    );
     await controller.openRecord(record.entityKey as never);
     return { container, controller, calls, record };
   }
