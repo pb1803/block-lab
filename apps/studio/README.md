@@ -118,7 +118,8 @@ export.
 
 `src/arkiv/` adds wallet-mediated publish, history search, record details and
 record comparison to Studio. The comparison panel stays **read-only**; the Arkiv
-panel adds exactly one write path (Publish), and only from an explicit click.
+panel has exactly two write paths, both from an explicit click: Publish (create)
+and Transfer ownership (`changeOwnership`).
 
 ### Boundaries (unchanged core rules)
 
@@ -165,6 +166,32 @@ panel adds exactly one write path (Publish), and only from an explicit click.
   entity key, created/updated/expiry blocks) and the digest disclaimer. Missing,
   expired (SDK `NoEntityFoundError`), malformed and unreadable records have
   distinct, honest states.
+### Ownership transfer
+
+- Open an entity by key; the panel states your role out loud. Owner, creator,
+  both and neither are separate, because only the owner can transfer — a creator
+  who gave the entity away cannot.
+- **Preview transfer** always reads the entity live first and refuses (naming the
+  reason) when there is no wallet, the wallet is disconnected or on the wrong
+  network, the entity is expired, the account is not the owner, the address is
+  invalid or zero, or the address is already the owner. Nothing is signed.
+- The preview lists entity, creator (unchanged), owner now, owner after, signer,
+  role, expiry (unchanged) and retained payload size, with the caveat that the
+  recipient does not accept and creator can never be changed.
+- **Confirm transfer** re-reads the owner immediately before sending, so a wallet
+  switch in between refreshes the preview instead of sending a doomed call. One
+  `changeOwnership` per confirmation; a success is followed by an in-process
+  read-back comparing six things (same entity, owner is the recipient, owner
+  changed, creator unchanged, expiry unchanged, payload unchanged).
+- An error is never retried. The controller re-reads once and states which of the
+  two outcomes happened ("it landed" / "still owned by …"), then stops.
+- Mechanism (from the SDK, not from field names): `OperationType.TransferOwnership
+  = 4` with an op of exactly `(entityKey, newOwner)`, no recipient-accept step,
+  `NotOwner`/`TransferToSelf`/`TransferToZeroAddress`/`EntityExpired` reverts.
+  Evidence and the pending live runbook: [docs/arkiv-ark05.md](../../docs/arkiv-ark05.md).
+
+### Compare
+
 - `compareRecords` reuses the shared metadata contract field by field. It is not
   a second RPC comparison engine — `src/comparison/` remains the only per-method
   measurement engine. Local (pasted) records are always labelled "Local record".

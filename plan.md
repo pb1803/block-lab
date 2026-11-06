@@ -383,6 +383,15 @@ mined, the entity reads back, every payload field matches, actual gas was
     `3221226505` while the success path never exited at all (`Stop` + `finally`
     lifecycle, this phase).
 
+    ARK-05 (ownership transfer) was brought to implementation-ready without any
+    broadcast: the transfer mechanism was pinned to the installed SDK
+    (`OperationType.TransferOwnership = 4`, `changeOwnership`, owner-must-sign,
+    no accept step) and Studio gained a gated preview → confirm → read-back flow
+    plus an honest-uncertainty path that re-reads once and never auto-retries.
+    ARK-05 stays PARTIAL: nothing has been transferred yet, so the on-chain
+    behaviour in [docs/arkiv-ark05.md](docs/arkiv-ark05.md) remains unobserved and
+    awaits an approved two-wallet run.
+
 Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
 25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
 the publication claim rests on the read-back above, never on a mock run).

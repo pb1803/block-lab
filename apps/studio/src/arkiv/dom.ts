@@ -60,6 +60,15 @@ interface PanelRefs {
   readonly detailRows: HTMLElement;
   readonly detailError: HTMLElement;
   readonly disclosureTitle: HTMLElement;
+  readonly transferInput: HTMLInputElement;
+  readonly transferPreviewButton: HTMLButtonElement;
+  readonly transferConfirmButton: HTMLButtonElement;
+  readonly transferPhase: HTMLElement;
+  readonly transferRole: HTMLElement;
+  readonly transferRows: HTMLElement;
+  readonly transferCaveats: HTMLElement;
+  readonly transferReadBack: HTMLElement;
+  readonly transferError: HTMLElement;
 }
 
 function setTone(element: HTMLElement, tone: Tone | undefined): void {
@@ -153,6 +162,27 @@ export function mountStudioArkiv(
     for (const row of view.detail.rows) {
       refs.detailRows.append(rowElement(doc, row.label, row.value, row.tone));
     }
+    setTone(refs.transferPhase, view.transfer.phaseTone);
+    refs.transferPhase.textContent = view.transfer.phaseText;
+    setTone(refs.transferRole, view.transfer.roleTone);
+    refs.transferRole.textContent = view.transfer.roleLine;
+    refs.transferRows.replaceChildren();
+    for (const row of view.transfer.rows) {
+      refs.transferRows.append(rowElement(doc, row.label, row.value, row.tone));
+    }
+    refs.transferCaveats.replaceChildren();
+    for (const caveat of view.transfer.caveats) {
+      const item = doc.createElement("li");
+      item.textContent = caveat;
+      refs.transferCaveats.append(item);
+    }
+    refs.transferReadBack.textContent = view.transfer.readBackLine ?? "";
+    setTone(refs.transferReadBack, view.transfer.readBackTone);
+    refs.transferError.textContent = view.transfer.error ?? "";
+    setTone(refs.transferError, view.transfer.errorTone);
+    refs.transferPreviewButton.disabled = !view.transfer.canPreview;
+    refs.transferConfirmButton.disabled = !view.transfer.canConfirm;
+    refs.transferConfirmButton.hidden = view.transfer.rows.length === 0;
   };
 
   const onClick = (event: Event): void => {
@@ -194,6 +224,23 @@ export function mountStudioArkiv(
           void controller.search(field, refs.searchValueInput.value);
           break;
         }
+        case "transfer-preview": {
+          event.preventDefault();
+          const record = controller.state.detail.record;
+          if (record === undefined) return;
+          void controller.previewTransfer(
+            record.entityKey,
+            refs.transferInput.value,
+          );
+          break;
+        }
+        case "transfer-confirm":
+          event.preventDefault();
+          void controller.submitTransfer();
+          break;
+        case "transfer-reset":
+          controller.resetTransfer();
+          break;
         case "open-key": {
           event.preventDefault();
           const key = refs.keyInput.value.trim();
@@ -384,6 +431,46 @@ function createPanel(doc: Document, container: HTMLElement): PanelRefs {
   detailRows.setAttribute("data-testid", "sr-detail-rows");
   detail.append(detailRows);
   const detailError = line(detail, "sr-detail-error");
+
+  const transfer = section("Ownership transfer", "sr-transfer");
+  const transferRole = line(transfer, "sr-transfer-role");
+  const transferInput = doc.createElement("input");
+  transferInput.type = "text";
+  transferInput.setAttribute("data-testid", "sr-transfer-input");
+  transferInput.placeholder = "New owner address (0x…)";
+  const transferPreviewButton = button(
+    transfer,
+    "Preview transfer",
+    "transfer-preview",
+  );
+  const transferRow = doc.createElement("div");
+  transferRow.className = "search-row";
+  transferRow.append(transferInput, transferPreviewButton);
+  transfer.append(transferRow);
+  const transferPhase = line(transfer, "sr-transfer-phase");
+  const transferRows = doc.createElement("div");
+  transferRows.className = "detail-rows";
+  transferRows.setAttribute("data-testid", "sr-transfer-rows");
+  transfer.append(transferRows);
+  const transferCaveats = doc.createElement("ul");
+  transferCaveats.className = "transfer-caveats";
+  transferCaveats.setAttribute("data-testid", "sr-transfer-caveats");
+  transfer.append(transferCaveats);
+  const transferConfirmButton = button(
+    transfer,
+    "Confirm transfer",
+    "transfer-confirm",
+  );
+  transferConfirmButton.hidden = true;
+  const transferResetButton = button(
+    transfer,
+    "Clear transfer",
+    "transfer-reset",
+  );
+  transfer.append(transferConfirmButton, transferResetButton);
+  const transferReadBack = line(transfer, "sr-transfer-readback");
+  const transferError = line(transfer, "sr-transfer-error");
+
   const disclaimer = line(detail, "sr-disclaimer");
   disclaimer.textContent =
     "The evidence digest is a hash of local evidence only; the detailed traces stay local and are not on Arkiv.";
@@ -414,6 +501,15 @@ function createPanel(doc: Document, container: HTMLElement): PanelRefs {
     detailRows,
     detailError,
     disclosureTitle,
+    transferInput,
+    transferPreviewButton,
+    transferConfirmButton,
+    transferPhase,
+    transferRole,
+    transferRows,
+    transferCaveats,
+    transferReadBack,
+    transferError,
   };
 }
 

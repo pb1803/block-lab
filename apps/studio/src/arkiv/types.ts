@@ -8,6 +8,7 @@
  */
 import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import type { Address, Hex } from "viem";
+import type { TransferState } from "./ownership.js";
 
 /** Wallet attach/detach and network state. */
 export type WalletStatus =
@@ -129,6 +130,7 @@ export type StudioArkivState = {
   readonly publish: PublishState;
   readonly history: HistoryState;
   readonly detail: DetailState;
+  readonly transfer: TransferState;
 };
 
 export function initialState(): StudioArkivState {
@@ -153,6 +155,16 @@ export function initialState(): StudioArkivState {
       phase: "idle",
       entityKey: undefined,
       record: undefined,
+      error: undefined,
+    },
+    transfer: {
+      phase: "idle",
+      entityKey: undefined,
+      newOwner: undefined,
+      before: undefined,
+      txHash: undefined,
+      after: undefined,
+      readBack: undefined,
       error: undefined,
     },
   };

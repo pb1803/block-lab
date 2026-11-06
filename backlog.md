@@ -139,7 +139,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 | ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | DONE |
 | ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | DONE (2026-11-06; see notes) |
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
-| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL — `owner == creator` holds on both published entities, but no two-wallet transfer has been observed (see note) |
+| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL — transfer semantics established from the SDK (`creator` immutable, `owner` mutable, owner must sign, no accept step) and implemented + unit-tested in Studio; no transfer broadcast yet (see note, [docs/arkiv-ark05.md](docs/arkiv-ark05.md)) |
 | ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | PARTIAL — configuration documented on both entities; nothing observed expiring yet (`studio-mm-001` expires at block `586222`) |
 | ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | DONE (2026-11-06) — real MetaMask signature from Studio, entity `0x9038f929…bcb7`, tx `0xef91a94a…5f2d9`, 11/11 read-back checks; evidence in [docs/arkiv-ark07.md](docs/arkiv-ark07.md) |
 | ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | PARTIAL — implemented and unit-tested; loading/empty/error verified in headless Chrome with the mock wallet, but the success state is only reachable live now that `studio-mm-001` exists (not yet driven through Studio's DOM), and the expired state needs ARK-06 |
@@ -160,7 +160,18 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   expiresAt block `571599`, on-chain payload byte-identical to the canonical
   record and re-validating (603 bytes, SHA-256 `410e3d5c…38f4d`).
 - **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. The published `blocklab.experiment` record is now findable by `experimentId` too.
-- **ARK-05 PARTIAL**: `owner == creator` is verified on both published entities (`poc-write-001`, and the MetaMask-signed `studio-mm-001`) and on public `posts` entities, but every write used a single wallet. Missing: a two-wallet experiment (A creates, B receives) or an observed `changeOwnership`, so nothing is claimed about transfer semantics, and `creator` is never asserted to change.
+- **ARK-05 PARTIAL**: `owner == creator` is verified on both published entities
+  (`poc-write-001`, and the MetaMask-signed `studio-mm-001`) and on public `posts`
+  entities, but every write used a single wallet. The transfer *mechanism* is now
+  pinned to the installed SDK, not to names: `OperationType.TransferOwnership = 4`
+  with an op of exactly `(bytes32 entityKey, address newOwner)`, a wallet action
+  `changeOwnership`, `NotOwner`/`TransferToSelf`/`TransferToZeroAddress` reverts,
+  and no recipient-accept step anywhere — so `creator` cannot change, `owner` can,
+  and only the owner may sign (evidence table in
+  [docs/arkiv-ark05.md](docs/arkiv-ark05.md)). Studio now has a preview → confirm →
+  read-back transfer flow with every precondition gated, and it never auto-retries.
+  **Still missing:** an actual broadcast. Nothing is claimed about live behaviour,
+  gas, or the `OwnershipTransferred` event until a two-wallet run is recorded.
 - **ARK-06 PARTIAL**: expiry *configuration* is evidenced twice — `expiresAt` `571599` on `poc-write-001` and `586222` on `studio-mm-001`, both exactly `creation + 302400` blocks, matching the `expiryDays: 7` request. Nothing has been *observed* expiring: both entities are still inside their windows, so the post-expiry read behaviour (`NoEntityFoundError` / `missing` state) is only unit-tested, never seen against Rabdi.
 - **ARK-07 DONE (2026-11-06)**: a real MetaMask approval published the dedicated
   test record `studio-mm-001` from Studio on Rabdi and the entity was read back
@@ -221,23 +232,33 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   (ARK-07, MetaMask-signed from Studio). ARK-05 (two-wallet ownership transfer) and
   ARK-06 (observed expiry) stay PARTIAL and are explicitly not claimed.
 
-### Next Arkiv requirement (not started)
+### Next Arkiv requirement (implementation ready, live run pending)
 
-**ARK-05 — verify owner and creator semantics.** Next because it is the highest
-remaining P1 and every Arkiv write so far used one wallet, so `creator` versus
-`owner` has never been meaningfully distinguished.
+**ARK-05 — verify owner and creator semantics.** Highest remaining P1: every Arkiv
+write so far used one wallet, so `creator` versus `owner` has never been
+meaningfully distinguished.
 
+- **Mechanism: settled from the SDK.** `OperationType.TransferOwnership = 4`, op
+  payload exactly `(bytes32 entityKey, address newOwner)`, wallet action
+  `changeOwnership`, reverts `NotOwner`/`TransferToSelf`/`TransferToZeroAddress`/
+  `EntityExpired`, event `OwnershipTransferred(entityKey, previousOwner,
+  newOwner)`, `$owner` queryable and reserved. No accept step exists in the SDK, so
+  a transfer is one owner-signed transaction and `creator` cannot change.
+  Evidence table: [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
+- **Implemented:** preview → confirm → read-back in Studio (`ownership.ts` pure
+  logic + `state`/`view`/`dom` + two gateway methods), with every precondition
+  gated, a live re-read before sending, an in-process read-back comparison and no
+  automatic retry. Unit-tested only so far.
 - Acceptance: a live result that records *observed* ownership behaviour, i.e. a
-two-wallet experiment (wallet A creates, wallet B is involved) and/or an observed
-`changeOwnership`, with `owner` and `creator` compared before and after.
-- Dependencies: ARK-04 (already DONE). It needs a second Rabdi account with tGLM
-  and a second authorization, and it must not touch `poc-write-001` or
-  `studio-mm-001` — a fresh id is required.
+  two-wallet experiment (wallet A creates, wallet B receives) and/or an observed
+  `changeOwnership`, with `owner` and `creator` compared before and after, plus the
+  negative check that A can no longer transfer. Procedure: the runbook in
+  [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
+- Dependencies: ARK-04 (DONE). Needs a second funded Rabdi account; must not touch
+  `poc-write-001` or `studio-mm-001` — a fresh id (`studio-mm-002`) is required.
 - Then ARK-06 (observed expiry), which needs a short-lifetime entity and a wait
   across its `expiresAt` block; and ARK-08's live success/expired states, which
   depend on both.
-- Studio's Arkiv panel has exactly one write path (create); `changeOwnership`
-  exists in the SDK decorator but is not yet wired into Studio.
 
 ## ENSv2 conditional
 

@@ -15,6 +15,12 @@ import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import type { Address, Hex } from "viem";
 import { HISTORY_LIMIT, type HistorySearchField } from "./config.js";
 import { type ArkivGateway, MalformedRecordError } from "./gateway.js";
+import type { OwnershipSnapshot } from "./ownership.js";
+import {
+  compareOwnership,
+  normalizeAddress,
+  transferBlockReason,
+} from "./ownership.js";
 import { findSensitiveContent, verifyReadBack } from "./record.js";
 import { type ArkivEvent, reduce } from "./state.js";
 import type { StudioArkivState, StudioError } from "./types.js";
@@ -209,6 +215,211 @@ export class ArkivController {
     }
   }
 
+  resetTransfer(): void {
+    this.#invalidateInFlight();
+    this.#emit({ type: "transfer-reset" });
+  }
+
+  /**
+   * Reads the entity live and stages a preview. Nothing is signed here, so the
+   * confirmation always reflects chain state at preview time.
+   */
+  async previewTransfer(entityKey: Hex, typedNewOwner: string): Promise<void> {
+    const gateway = this.gateway;
+    if (gateway === null) {
+      this.#emit({
+        type: "transfer-failed",
+        error: { category: "validation", message: "Gateway is not ready." },
+      });
+      return;
+    }
+    const newOwner = normalizeAddress(typedNewOwner);
+    const generation = this.#generation;
+    let snapshot: OwnershipSnapshot;
+    let currentBlock: bigint | null;
+    try {
+      const read = await gateway.readOwnership(entityKey);
+      snapshot = { entityKey, ...read };
+      currentBlock = await gateway.currentBlock().catch(() => null);
+    } catch (error) {
+      this.#emit(
+        { type: "transfer-failed", error: this.#classify(error) },
+        generation,
+      );
+      return;
+    }
+    const blocked = transferBlockReason({
+      wallet: this.#state.wallet,
+      snapshot,
+      newOwner: typedNewOwner,
+      currentBlock,
+    });
+    if (blocked !== null || newOwner === null) {
+      this.#emit(
+        {
+          type: "transfer-failed",
+          error: blocked ?? {
+            category: "validation",
+            message: "Enter a valid recipient address.",
+          },
+        },
+        generation,
+      );
+      return;
+    }
+    this.#emit(
+      { type: "transfer-previewed", entityKey, newOwner, before: snapshot },
+      generation,
+    );
+  }
+
+  /**
+   * Exactly one transfer per preview. The owner is re-read immediately before the
+   * send so a wallet change in between cannot send a transfer the wallet will
+   * simply revert; an error is never retried, it is re-read and reported.
+   */
+  async submitTransfer(): Promise<void> {
+    const gateway = this.gateway;
+    const staged = this.#state.transfer;
+    const newOwner = staged.newOwner;
+    const before = staged.before;
+    if (
+      gateway === null ||
+      newOwner === undefined ||
+      before === undefined ||
+      staged.phase !== "preview"
+    ) {
+      this.#emit({
+        type: "transfer-failed",
+        error: {
+          category: "validation",
+          message: "Preview the transfer again before confirming it.",
+        },
+      });
+      return;
+    }
+    const signer = this.#state.wallet.address;
+    const generation = this.#generation;
+
+    // Drift guard: the owner and the target must still be what was previewed.
+    try {
+      const fresh = await gateway.readOwnership(before.entityKey);
+      const drift = compareBefore(before, {
+        entityKey: before.entityKey,
+        ...fresh,
+      });
+      if (drift !== null) {
+        this.#emit(
+          {
+            type: "transfer-previewed",
+            entityKey: before.entityKey,
+            newOwner,
+            before: { entityKey: before.entityKey, ...fresh },
+          },
+          generation,
+        );
+        this.#emit(
+          {
+            type: "transfer-failed",
+            error: { category: "duplicate", message: drift },
+          },
+          generation,
+        );
+        return;
+      }
+      if (signer !== undefined && fresh.owner !== signer) {
+        this.#emit(
+          {
+            type: "transfer-failed",
+            error: {
+              category: "wrong-network",
+              message: `The owner changed to ${fresh.owner} while previewing; reconnect that account and preview again.`,
+            },
+          },
+          generation,
+        );
+        return;
+      }
+    } catch (error) {
+      this.#emit(
+        { type: "transfer-failed", error: this.#classify(error) },
+        generation,
+      );
+      return;
+    }
+
+    this.#emit({ type: "transfer-submitting" }, generation);
+    try {
+      const txHash = await gateway.transferOwnership(
+        before.entityKey,
+        newOwner,
+      );
+      // Independent read-back, in this process, against what was previewed.
+      const after = await gateway.readOwnership(before.entityKey).then(
+        (read) => ({ entityKey: before.entityKey, ...read }),
+        () => null,
+      );
+      if (after === null) {
+        this.#emit(
+          {
+            type: "transfer-confirmed",
+            txHash,
+            after: before,
+            readBack: {
+              ok: false,
+              checks: [
+                {
+                  name: "the entity could be read back after the transfer",
+                  ok: false,
+                  detail:
+                    "read-back failed; re-open the entity before relying on it",
+                },
+              ],
+            },
+          },
+          generation,
+        );
+        return;
+      }
+      this.#emit(
+        {
+          type: "transfer-confirmed",
+          txHash,
+          after,
+          readBack: compareOwnership(before, after, newOwner),
+        },
+        generation,
+      );
+    } catch (error) {
+      // Never re-sign: re-read once and say what the chain shows now.
+      const after = await gateway
+        .readOwnership(before.entityKey)
+        .catch(() => null);
+      const moved = after !== null && after.owner === newOwner;
+      this.#emit(
+        {
+          type: "transfer-failed",
+          ...(after === null
+            ? {}
+            : {
+                readBack: compareOwnership(
+                  before,
+                  { entityKey: before.entityKey, ...after },
+                  newOwner,
+                ),
+              }),
+          error: {
+            category: this.#classify(error).category,
+            message: moved
+              ? `The transfer reported an error, but the owner is now ${after.owner}: it landed. Nothing was re-signed.`
+              : `The transfer failed and ${before.entityKey} is still owned by ${after?.owner ?? before.owner}. Nothing was re-signed.`,
+          },
+        },
+        generation,
+      );
+    }
+  }
+
   async #verifyReadBack(
     gateway: ArkivGateway,
     metadata: ExperimentMetadata,
@@ -301,4 +512,27 @@ export class ArkivController {
       this.#emit({ type: "detail-failed", error: classified }, generation);
     }
   }
+}
+
+/**
+ * Why a previewed transfer is no longer valid, or null when it still is. A
+ * changed owner, a changed expiry or a changed payload all invalidate it.
+ */
+function compareBefore(
+  before: OwnershipSnapshot,
+  fresh: OwnershipSnapshot,
+): string | null {
+  if (fresh.owner === before.owner) {
+    if (fresh.creator !== before.creator) {
+      return `The creator changed from ${before.creator} to ${fresh.creator}; preview again.`;
+    }
+    if (fresh.expiresAtBlock !== before.expiresAtBlock) {
+      return `The expiry changed to block ${fresh.expiresAtBlock}; preview again.`;
+    }
+    if (fresh.payloadHex !== before.payloadHex) {
+      return "The payload changed since the preview; preview again.";
+    }
+    return null;
+  }
+  return `The owner changed from ${before.owner} to ${fresh.owner} since the preview; preview again.`;
 }

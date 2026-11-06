@@ -9,6 +9,7 @@ import {
   detailView,
   historyView,
   publishView,
+  studioArkivView,
   walletView,
 } from "./view.js";
 
@@ -250,3 +251,63 @@ describe("detailView", () => {
 });
 
 void payloadHex;
+
+describe("transferView", () => {
+  const key = "0xaaaa" as const;
+  const owner = "0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759" as const;
+  const newOwner = "0x2222222222222222222222222222222222222222" as const;
+  const before = {
+    entityKey: key,
+    owner,
+    creator: owner,
+    expiresAtBlock: 900n,
+    payloadHex: "0x7b7d" as const,
+  };
+
+  it("explains the idle state and enables nothing", () => {
+    const view = studioArkivView(initialState());
+    expect(view.transfer.phaseText).toContain("No transfer staged");
+    expect(view.transfer.canConfirm).toBe(false);
+    expect(view.transfer.rows).toHaveLength(0);
+  });
+
+  it("renders the preview rows and the caveats", () => {
+    const base = initialState();
+    const view = studioArkivView({
+      ...base,
+      wallet: { ...base.wallet, status: "connected", address: owner },
+      transfer: {
+        phase: "preview",
+        newOwner,
+        before,
+        txHash: undefined,
+        after: undefined,
+        readBack: undefined,
+        error: undefined,
+      },
+    });
+    expect(view.transfer.canConfirm).toBe(true);
+    expect(view.transfer.rows.map((row) => row.label)).toContain("Owner after");
+    expect(view.transfer.caveats.length).toBeGreaterThan(0);
+    expect(view.transfer.phaseTone).toBe("warn");
+  });
+
+  it("reports a failed read-back", () => {
+    const base = initialState();
+    const view = studioArkivView({
+      ...base,
+      transfer: {
+        ...base.transfer,
+        phase: "confirmed",
+        readBack: {
+          ok: false,
+          checks: [
+            { name: "the owner is the recipient", ok: false, detail: "x" },
+          ],
+        },
+      },
+    });
+    expect(view.transfer.readBackTone).toBe("error");
+    expect(view.transfer.readBackLine).toContain("Read-back failed");
+  });
+});

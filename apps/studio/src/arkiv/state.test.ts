@@ -191,3 +191,80 @@ describe("state reducer — history and detail", () => {
     expect(state.detail.phase).toBe("malformed");
   });
 });
+
+describe("reduce — transfer", () => {
+  const key = "0xaaaa" as const;
+  const newOwner = "0x2222222222222222222222222222222222222222" as const;
+  const before = {
+    entityKey: key,
+    owner: "0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759" as const,
+    creator: "0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759" as const,
+    expiresAtBlock: 900n,
+    payloadHex: "0x7b7d" as const,
+  };
+
+  it("stages a preview", () => {
+    const state = reduce(initialState(), {
+      type: "transfer-previewed",
+      entityKey: key,
+      newOwner,
+      before,
+    });
+    expect(state.transfer.phase).toBe("preview");
+    expect(state.transfer.before).toEqual(before);
+  });
+
+  it("only submits from a preview", () => {
+    const idle = reduce(initialState(), { type: "transfer-submitting" });
+    expect(idle.transfer.phase).toBe("idle");
+    const staged = reduce(
+      reduce(initialState(), {
+        type: "transfer-previewed",
+        entityKey: key,
+        newOwner,
+        before,
+      }),
+      { type: "transfer-submitting" },
+    );
+    expect(staged.transfer.phase).toBe("submitting");
+  });
+
+  it("only confirms from submitting or confirming", () => {
+    const state = reduce(initialState(), {
+      type: "transfer-previewed",
+      entityKey: key,
+      newOwner,
+      before,
+    });
+    const early = reduce(state, {
+      type: "transfer-confirmed",
+      txHash: "0xfeed" as const,
+      after: before,
+      readBack: { ok: true, checks: [] },
+    });
+    expect(early.transfer.phase).toBe("preview");
+  });
+
+  it("records the read-back verdict and resets cleanly", () => {
+    const state = reduce(
+      reduce(initialState(), {
+        type: "transfer-previewed",
+        entityKey: key,
+        newOwner,
+        before,
+      }),
+      { type: "transfer-submitting" },
+    );
+    const done = reduce(state, {
+      type: "transfer-confirmed",
+      txHash: "0xfeed" as const,
+      after: { ...before, owner: newOwner },
+      readBack: { ok: false, checks: [] },
+    });
+    expect(done.transfer.phase).toBe("confirmed");
+    expect(done.transfer.readBack?.ok).toBe(false);
+    expect(reduce(done, { type: "transfer-reset" }).transfer.phase).toBe(
+      "idle",
+    );
+  });
+});

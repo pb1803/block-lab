@@ -9,6 +9,7 @@
 import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import type { Address, Hex } from "viem";
 import { RABDI_CHAIN_ID_HEX } from "./config.js";
+import type { OwnershipSnapshot, ReadBackVerdict } from "./ownership.js";
 import type {
   ArkivRecord,
   ReadBackResult,
@@ -61,7 +62,26 @@ export type ArkivEvent =
   | { readonly type: "detail-succeeded"; readonly record: ArkivRecord }
   | { readonly type: "detail-missing" }
   | { readonly type: "detail-malformed"; readonly error: StudioError }
-  | { readonly type: "detail-failed"; readonly error: StudioError };
+  | { readonly type: "detail-failed"; readonly error: StudioError }
+  | {
+      readonly type: "transfer-previewed";
+      readonly entityKey: Hex;
+      readonly newOwner: Address;
+      readonly before: OwnershipSnapshot;
+    }
+  | { readonly type: "transfer-submitting" }
+  | {
+      readonly type: "transfer-confirmed";
+      readonly txHash: Hex;
+      readonly after: OwnershipSnapshot;
+      readonly readBack: ReadBackVerdict;
+    }
+  | {
+      readonly type: "transfer-failed";
+      readonly error: StudioError;
+      readonly readBack?: ReadBackVerdict;
+    }
+  | { readonly type: "transfer-reset" };
 
 function asChainId(value: Hex): Hex {
   return value.toLowerCase() as Hex;
@@ -350,6 +370,77 @@ export function reduce(
           entityKey: state.detail.entityKey,
           record: undefined,
           error: event.error,
+        },
+      };
+
+    case "transfer-previewed":
+      return {
+        ...state,
+        transfer: {
+          phase: "preview",
+          entityKey: event.entityKey,
+          newOwner: event.newOwner,
+          before: event.before,
+          txHash: undefined,
+          after: undefined,
+          readBack: undefined,
+          error: undefined,
+        },
+      };
+
+    // Only a previewed transfer may start, so the preview is never stale by
+    // the time the wallet prompt appears.
+    case "transfer-submitting":
+      if (state.transfer.phase !== "preview") return state;
+      return {
+        ...state,
+        transfer: { ...state.transfer, phase: "submitting", error: undefined },
+      };
+
+    case "transfer-confirmed":
+      if (
+        state.transfer.phase !== "submitting" &&
+        state.transfer.phase !== "confirming"
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        transfer: {
+          ...state.transfer,
+          phase: "confirmed",
+          txHash: event.txHash,
+          after: event.after,
+          readBack: event.readBack,
+          error: undefined,
+        },
+      };
+
+    case "transfer-failed":
+      return {
+        ...state,
+        transfer: {
+          ...state.transfer,
+          phase: "failed",
+          error: event.error,
+          // Present when the outcome was uncertain but re-readable, so the
+          // read-back verdict is shown even though the call reported an error.
+          readBack: event.readBack ?? state.transfer.readBack,
+        },
+      };
+
+    case "transfer-reset":
+      return {
+        ...state,
+        transfer: {
+          phase: "idle",
+          entityKey: undefined,
+          newOwner: undefined,
+          before: undefined,
+          txHash: undefined,
+          after: undefined,
+          readBack: undefined,
+          error: undefined,
         },
       };
   }

@@ -7,6 +7,11 @@
  */
 import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import { RABDI_BLOCK_TIME_MS, RABDI_CHAIN_ID_HEX } from "./config.js";
+import {
+  ownershipRole,
+  transferCaveats,
+  transferPreviewRows,
+} from "./ownership.js";
 import { publicDisclosure } from "./record.js";
 import type {
   ArkivRecord,
@@ -79,11 +84,27 @@ export type CompareView = {
   readonly summary: string;
 };
 
+export type TransferView = {
+  readonly phaseText: string;
+  readonly phaseTone: Tone;
+  readonly roleLine: string;
+  readonly roleTone: Tone;
+  readonly rows: readonly ViewRow[];
+  readonly caveats: readonly string[];
+  readonly error: string | undefined;
+  readonly errorTone: Tone;
+  readonly canPreview: boolean;
+  readonly canConfirm: boolean;
+  readonly readBackLine: string | undefined;
+  readonly readBackTone: Tone | undefined;
+};
+
 export type StudioArkivView = {
   readonly wallet: WalletView;
   readonly publish: PublishView;
   readonly history: HistoryView;
   readonly detail: DetailView;
+  readonly transfer: TransferView;
 };
 
 function short(address: string): string {
@@ -354,5 +375,81 @@ export function studioArkivView(state: StudioArkivState): StudioArkivView {
     publish: publishView(state),
     history: historyView(state),
     detail: detailView(state),
+    transfer: transferView(state),
+  };
+}
+
+/**
+ * The ownership-transfer panel. Role wording distinguishes creator from owner
+ * explicitly, because the two are easy to conflate and only the owner can sign a
+ * transfer. Confirming is possible only from a fresh preview on an entity the
+ * connected account owns.
+ */
+function transferView(state: StudioArkivState): TransferView {
+  const transfer = state.transfer;
+  const record = state.detail.record;
+  const signer = state.wallet.address;
+  const role =
+    record === undefined
+      ? undefined
+      : ownershipRole({ owner: record.owner, creator: record.creator }, signer);
+  const phaseText: Record<typeof transfer.phase, string> = {
+    idle: "No transfer staged. Open an entity, enter a recipient and preview.",
+    preview: "Previewed against a live read. Nothing has been signed yet.",
+    submitting: "Waiting for the wallet to sign the transfer…",
+    confirming: "Signed; waiting for the mined receipt…",
+    confirmed: "Transfer confirmed by the receipt.",
+    failed: "The transfer did not complete.",
+  };
+  const phaseTone: Record<typeof transfer.phase, Tone> = {
+    idle: "neutral",
+    preview: "warn",
+    submitting: "warn",
+    confirming: "warn",
+    confirmed: "ok",
+    failed: "error",
+  };
+  const staged = transfer.phase === "preview";
+  const rows: ViewRow[] =
+    staged &&
+    transfer.before !== undefined &&
+    transfer.newOwner !== undefined &&
+    signer !== undefined
+      ? transferPreviewRows({
+          snapshot: transfer.before,
+          signer,
+          newOwner: transfer.newOwner,
+        }).map((row) => ({ label: row.label, value: row.value }))
+      : [];
+  const readBack = transfer.readBack;
+  return {
+    phaseText: phaseText[transfer.phase],
+    phaseTone: phaseTone[transfer.phase],
+    roleLine:
+      role === undefined
+        ? "Open an entity to see whether the connected account may transfer it."
+        : role.summary,
+    roleTone: role === undefined ? "neutral" : role.isOwner ? "ok" : "warn",
+    rows,
+    caveats: transfer.phase === "preview" ? transferCaveats() : [],
+    error: transfer.error?.message,
+    errorTone: "error",
+    canPreview:
+      record !== undefined &&
+      state.wallet.status === "connected" &&
+      transfer.phase !== "submitting" &&
+      transfer.phase !== "confirming",
+    canConfirm: staged && state.wallet.status === "connected",
+    readBackLine:
+      readBack === undefined
+        ? undefined
+        : readBack.ok
+          ? "Read-back passed: owner moved, creator/expiry/payload unchanged."
+          : `Read-back failed: ${readBack.checks
+              .filter((check) => !check.ok)
+              .map((check) => check.name)
+              .join("; ")}.`,
+    readBackTone:
+      readBack === undefined ? undefined : readBack.ok ? "ok" : "error",
   };
 }

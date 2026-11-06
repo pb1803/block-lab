@@ -4,7 +4,7 @@ import { RABDI_CHAIN_ID_HEX } from "./config.js";
 import { ArkivController } from "./controller.js";
 import { mountArkivCompare, mountStudioArkiv } from "./dom.js";
 import { arkivRecordFromRow } from "./record.js";
-import { makeRow, sampleMetadata } from "./test-fixtures.js";
+import { makeRow, SIGNER, sampleMetadata } from "./test-fixtures.js";
 import type { ArkivRecord } from "./types.js";
 import { initialState } from "./types.js";
 
@@ -520,3 +520,117 @@ describe("mountArkivCompare", () => {
 });
 
 void initialState;
+
+describe("mountStudioArkiv — ownership transfer", () => {
+  const NEW_OWNER = "0x2222222222222222222222222222222222222222";
+
+  function transferGateway(over: { owner?: string } = {}) {
+    const record = { ...validRecord(), owner: over.owner ?? SIGNER };
+    const calls = { transfer: 0 };
+    return {
+      calls,
+      record,
+      gateway: {
+        findExperiment: async () => ({ entityKey: null }),
+        publishExperiment: async () => {
+          throw new Error("unused");
+        },
+        readRecord: async () => record,
+        queryBy: async () => [],
+        currentBlock: async () => 269_199n,
+        readOwnership: async () => ({
+          owner: record.owner,
+          creator: record.creator,
+          expiresAtBlock: record.expiresAtBlock,
+          payloadHex: "0x7b7d",
+        }),
+        transferOwnership: async () => {
+          calls.transfer += 1;
+          return "0xbeef";
+        },
+      },
+    };
+  }
+
+  async function mounted(over: { owner?: string } = {}) {
+    const { gateway, calls, record } = transferGateway(over);
+    const container = makeContainer();
+    const controller = new ArkivController({ gateway: gateway as never });
+    mountStudioArkiv(container as never, controller, {
+      wallet: {
+        connect: () => undefined,
+        switchNetwork: () => undefined,
+        disconnect: () => undefined,
+        detect: () => undefined,
+      },
+      loadLocalRecord: () => null,
+      openByKey: () => null,
+    });
+    controller.walletConnected(SIGNER as never, RABDI_CHAIN_ID_HEX as never);
+    await controller.openRecord(record.entityKey as never);
+    return { container, controller, calls, record };
+  }
+
+  it("keeps Confirm hidden and Preview disabled until an entity is open", async () => {
+    const { container } = await mounted();
+    expect(findByAction(container, "transfer-confirm").hidden).toBe(true);
+    expect(findByAction(container, "transfer-preview").disabled).toBe(false);
+  });
+
+  it("says whether the connected account may transfer", async () => {
+    const { container } = await mounted();
+    expect(findByTestId(container, "sr-transfer-role").textContent).toMatch(
+      /can transfer/,
+    );
+  });
+
+  it("warns when the connected account is not the owner", async () => {
+    const { container } = await mounted({
+      owner: "0x9999999999999999999999999999999999999999",
+    });
+    expect(findByTestId(container, "sr-transfer-role").textContent).toMatch(
+      /no longer its owner/,
+    );
+  });
+
+  it("previews on click without signing, then reveals Confirm", async () => {
+    const { container, controller, calls, record } = await mounted();
+    const input = findByTestId(container, "sr-transfer-input");
+    input.value = NEW_OWNER;
+    click(container, findByAction(container, "transfer-preview"));
+    await tick();
+    expect(controller.state.transfer.phase).toBe("preview");
+    expect(calls.transfer).toBe(0);
+    expect(findByAction(container, "transfer-confirm").hidden).toBe(false);
+    expect(
+      findByTestId(container, "sr-transfer-rows").children.length,
+    ).toBeGreaterThan(0);
+    // The preview states what does not change.
+    expect(
+      findByTestId(container, "sr-transfer-caveats").children.length,
+    ).toBeGreaterThan(0);
+    expect(record.entityKey).toBe(controller.state.transfer.entityKey);
+  });
+
+  it("clears a staged transfer", async () => {
+    const { container, controller } = await mounted();
+    findByTestId(container, "sr-transfer-input").value = NEW_OWNER;
+    click(container, findByAction(container, "transfer-preview"));
+    await tick();
+    click(container, findByAction(container, "transfer-reset"));
+    await tick();
+    expect(controller.state.transfer.phase).toBe("idle");
+    expect(findByAction(container, "transfer-confirm").hidden).toBe(true);
+  });
+
+  it("confirms exactly once on click", async () => {
+    const { container, calls } = await mounted();
+    findByTestId(container, "sr-transfer-input").value = NEW_OWNER;
+    click(container, findByAction(container, "transfer-preview"));
+    await tick();
+    click(container, findByAction(container, "transfer-confirm"));
+    await tick();
+    await tick();
+    expect(calls.transfer).toBe(1);
+  });
+});

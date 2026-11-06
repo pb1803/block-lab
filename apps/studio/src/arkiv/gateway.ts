@@ -35,6 +35,13 @@ export type ExperimentLookup = {
   readonly entityKey: Hex | null;
 };
 
+export type OwnershipRead = {
+  readonly owner: Address;
+  readonly creator: Address;
+  readonly expiresAtBlock: bigint;
+  readonly payloadHex: Hex;
+};
+
 /** The read/write surface the Studio controllers drive. */
 export interface ArkivGateway {
   /** Finds an entity by its indexed experimentId, or null when none exists. */
@@ -51,6 +58,16 @@ export interface ArkivGateway {
   ): Promise<readonly RecordSummary[]>;
   /** Current head block, for expiry display. */
   currentBlock(): Promise<bigint>;
+  /**
+   * Owner, creator, expiry and payload of one entity, for an ownership transfer.
+   * Read-only: never needs a wallet.
+   */
+  readOwnership(entityKey: Hex): Promise<OwnershipRead>;
+  /**
+   * Signs and sends exactly one `TransferOwnership`; resolves once the receipt is
+   * mined. The current owner must be the connected account.
+   */
+  transferOwnership(entityKey: Hex, newOwner: Address): Promise<Hex>;
 }
 
 export type RabdiGatewayOptions = {
@@ -136,6 +153,45 @@ export function createRabdiGateway(
 
     async currentBlock() {
       return BigInt(await publicClient.getBlockNumber());
+    },
+
+    async readOwnership(entityKey) {
+      const row = await publicClient.getEntity(entityKey, experimentSchema);
+      // The system attributes are plain values at runtime; the select() typing
+      // cannot narrow them, so they are cast to their actual shapes here.
+      const owner = row.$owner as Address | undefined;
+      const creator = row.$creator as Address | undefined;
+      const expiresAt = row.$expiresAt as bigint | undefined;
+      const payload = row.payload as { readonly value?: Hex } | undefined;
+      if (
+        owner === undefined ||
+        creator === undefined ||
+        expiresAt === undefined ||
+        payload?.value === undefined
+      ) {
+        throw new MalformedRecordError(
+          "The entity did not report its owner, creator, expiry and payload.",
+        );
+      }
+      return {
+        owner,
+        creator,
+        expiresAtBlock: BigInt(expiresAt),
+        payloadHex: payload.value,
+      };
+    },
+
+    async transferOwnership(entityKey, newOwner) {
+      if (walletClient === undefined) {
+        throw new Error(
+          "No connected wallet: a transfer needs the owner's EIP-1193 account.",
+        );
+      }
+      const result = await walletClient.changeOwnership({
+        entityKey,
+        newOwner,
+      });
+      return result.txHash;
     },
   };
 }

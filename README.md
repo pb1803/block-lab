@@ -145,9 +145,12 @@ human MetaMask approval published `studio-mm-001` from Studio, verified 11/11 wi
 a byte-identical payload and `owner == creator == signer`. Full evidence:
 [docs/arkiv-ark07.md](docs/arkiv-ark07.md).
 
-What is **not** claimed: no two-wallet ownership experiment (ARK-05 PARTIAL), and
-no observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded on
-both entities but nothing was watched die). These stay experiments, not claims.
+What is **not** claimed: no two-wallet ownership experiment has been *run*
+(ARK-05 PARTIAL — the transfer mechanism is settled from the SDK and the Studio
+flow is implemented and tested, but nothing has been transferred yet), and no
+observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded on both
+entities but nothing was watched die). These stay experiments, not claims. See
+[docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 ## Studio Arkiv history
 

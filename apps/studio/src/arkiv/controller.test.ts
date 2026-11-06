@@ -12,6 +12,8 @@ import type { ArkivRecord, RecordSummary } from "./types.js";
 import { initialState } from "./types.js";
 
 const RABDI = "0x76edaf";
+const OWNER = "0xD431714db82331B07697Ea4675334C3AF6d2EBE9";
+const NEW_OWNER = "0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759";
 
 type FakeOptions = {
   readonly existing?: string | null;
@@ -21,6 +23,13 @@ type FakeOptions = {
   readonly queryError?: unknown;
   readonly records?: readonly RecordSummary[];
   readonly preflightError?: unknown;
+  /** Owner reported by readOwnership; the second read flips to `ownerAfter`. */
+  readonly owner?: string;
+  readonly ownerAfter?: string;
+  /** 1-based read count from which `ownerAfter` is reported. */
+  readonly ownerAfterFromCall?: number;
+  readonly creator?: string;
+  readonly transferError?: unknown;
 };
 
 function fakeGateway(options: FakeOptions = {}) {
@@ -29,7 +38,10 @@ function fakeGateway(options: FakeOptions = {}) {
     publish: 0,
     read: 0,
     query: 0,
+    readOwnership: 0,
+    transfer: 0,
   };
+  const owner = options.owner ?? OWNER;
   const validRecord = (): ArkivRecord => {
     const decoded = arkivRecordFromRow(makeRow());
     if (!decoded.ok) throw new Error("fixture invalid");
@@ -67,6 +79,25 @@ function fakeGateway(options: FakeOptions = {}) {
     },
     async currentBlock() {
       return 269_199n;
+    },
+    async readOwnership() {
+      calls.readOwnership += 1;
+      const reported =
+        options.ownerAfter !== undefined &&
+        calls.readOwnership >= (options.ownerAfterFromCall ?? 2)
+          ? options.ownerAfter
+          : owner;
+      return {
+        owner: reported as never,
+        creator: (options.creator ?? OWNER) as never,
+        expiresAtBlock: 571_599n,
+        payloadHex: "0x7b7d",
+      };
+    },
+    async transferOwnership() {
+      calls.transfer += 1;
+      if (options.transferError !== undefined) throw options.transferError;
+      return "0xbeef" as never;
     },
   };
   return { gateway, calls };
@@ -283,5 +314,128 @@ describe("initial state", () => {
     expect(state.wallet.status).toBe("missing");
     expect(state.publish.phase).toBe("idle");
     expect(state.history.records).toEqual([]);
+  });
+});
+
+describe("transfer — staging", () => {
+  function transferController(options: FakeOptions = {}) {
+    const { gateway, calls } = fakeGateway(options);
+    const controller = new ArkivController({ gateway });
+    controller.walletConnected(OWNER as never, RABDI as never);
+    return { controller, calls };
+  }
+
+  it("previews against a live read and signs nothing", async () => {
+    const { controller, calls } = transferController();
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    expect(calls.transfer).toBe(0);
+    expect(controller.state.transfer.phase).toBe("preview");
+    expect(controller.state.transfer.before?.owner).toBe(OWNER);
+    expect(controller.state.transfer.newOwner).toBe(NEW_OWNER);
+  });
+
+  it("blocks a wallet that is not the owner", async () => {
+    const { gateway } = fakeGateway();
+    const controller = new ArkivController({ gateway });
+    controller.walletConnected(
+      "0x9999999999999999999999999999999999999999" as never,
+      RABDI as never,
+    );
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    expect(controller.state.transfer.phase).toBe("failed");
+    expect(controller.state.transfer.error?.message).toMatch(/not the owner/);
+  });
+
+  it("blocks on the wrong network without switching", async () => {
+    const { gateway } = fakeGateway();
+    const controller = new ArkivController({ gateway });
+    controller.walletConnected(OWNER as never, "0x1" as never);
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    expect(controller.state.transfer.error?.message).toMatch(/0x76edaf/);
+  });
+
+  it("requires a preview before confirming", async () => {
+    const { controller, calls } = transferController();
+    await controller.submitTransfer();
+    expect(calls.transfer).toBe(0);
+    expect(controller.state.transfer.error?.message).toMatch(/Preview/);
+  });
+});
+
+describe("transfer — submitting", () => {
+  function staged(options: FakeOptions = {}) {
+    const { gateway, calls } = fakeGateway(options);
+    const controller = new ArkivController({ gateway });
+    controller.walletConnected(OWNER as never, RABDI as never);
+    return { controller, calls };
+  }
+
+  it("sends exactly one transfer and verifies the read-back", async () => {
+    const { controller, calls } = staged({
+      ownerAfter: NEW_OWNER,
+      ownerAfterFromCall: 3,
+    });
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(calls.transfer).toBe(1);
+    expect(controller.state.transfer.phase).toBe("confirmed");
+    expect(controller.state.transfer.readBack?.ok).toBe(true);
+    expect(controller.state.transfer.txHash).toBe("0xbeef");
+  });
+
+  it("reports a wallet rejection and does not retry", async () => {
+    const rejection = Object.assign(new Error("User rejected"), { code: 4001 });
+    const { controller, calls } = staged({ transferError: rejection });
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(calls.transfer).toBe(1);
+    expect(controller.state.transfer.phase).toBe("failed");
+    expect(controller.state.transfer.error?.category).toBe("user-rejected");
+  });
+
+  it("reports an uncertain outcome as landed when the owner moved", async () => {
+    const { controller } = staged({
+      transferError: new Error("receipt timeout"),
+      ownerAfter: NEW_OWNER,
+      ownerAfterFromCall: 3,
+    });
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(controller.state.transfer.error?.message).toMatch(/it landed/);
+    // The verdict is still reported, so the panel shows what the chain says.
+    expect(controller.state.transfer.readBack?.ok).toBe(true);
+  });
+
+  it("reports an uncertain outcome as not landed when the owner is unchanged", async () => {
+    const { controller, calls } = staged({
+      transferError: new Error("receipt timeout"),
+    });
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(calls.transfer).toBe(1);
+    expect(controller.state.transfer.error?.message).toMatch(/still owned by/);
+    expect(controller.state.transfer.readBack?.ok).toBe(false);
+  });
+
+  it("refuses to send when the owner changed after the preview", async () => {
+    const { controller, calls } = staged({
+      ownerAfter: NEW_OWNER,
+      ownerAfterFromCall: 2,
+    });
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(calls.transfer).toBe(0);
+    expect(controller.state.transfer.error?.message).toMatch(/preview again/);
+    // The refreshed owner is staged, so a second preview is not stale.
+    expect(controller.state.transfer.before?.owner).toBe(NEW_OWNER);
+  });
+
+  it("flags a mismatched read-back instead of claiming success", async () => {
+    // The transfer resolves but the owner never changed on read-back.
+    const { controller } = staged();
+    await controller.previewTransfer(ENTITY_KEY as never, NEW_OWNER);
+    await controller.submitTransfer();
+    expect(controller.state.transfer.phase).toBe("confirmed");
+    expect(controller.state.transfer.readBack?.ok).toBe(false);
   });
 });

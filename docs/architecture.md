@@ -140,7 +140,17 @@ write/query/retrieve run existed (`poc-write-001`, verified in
   and compare bytes. A failed preflight blocks signing; an uncertain write is
   re-queried once and reported with "nothing was re-signed" — never retried and
   never given a fabricated hash or key.
-- `state.ts` is the pure reducer (wallet/publish/history/detail), `view.ts` the
+- Ownership transfer is the second write path and reuses the same seam rather than
+  growing a second one: `ownership.ts` holds the pure role/precondition/preview/
+  read-back logic (the `ArkivGateway` gains only `readOwnership` and
+  `transferOwnership`), the reducer gains guarded `transfer-*` events, and the DOM
+  only obeys the view model. Preview never signs; confirming re-reads the owner
+  immediately before one `changeOwnership`; success is followed by a six-check
+  read-back; an error re-reads once and says which outcome happened without ever
+  re-signing. Mechanism comes from the SDK
+  (`OperationType.TransferOwnership = 4`, op `(entityKey, newOwner)`, no accept
+  step), documented in [arkiv-ark05.md](arkiv-ark05.md).
+- `state.ts` is the pure reducer (wallet/publish/history/detail/transfer), `view.ts` the
   pure view model, `compare.ts` the metadata field diff, and `dom.ts` the only
   DOM-touching module. `compare.ts` is not a second RPC comparison engine;
   `comparison/` remains the only measurement engine.
