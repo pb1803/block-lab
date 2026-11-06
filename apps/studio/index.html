@@ -4,6 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BLOCKLAB Studio</title>
+    <script>
+      (() => {
+        const key = "blocklab-studio-theme";
+        let preference = "system";
+        try {
+          const stored = window.localStorage.getItem(key);
+          if (stored === "light" || stored === "dark" || stored === "system") {
+            preference = stored;
+          } else if (stored !== null) {
+            window.localStorage.removeItem(key);
+          }
+        } catch {
+          preference = "system";
+        }
+        const systemPrefersDark =
+          window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+        const theme =
+          preference === "system"
+            ? systemPrefersDark
+              ? "dark"
+              : "light"
+            : preference;
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="studio-root"></div>

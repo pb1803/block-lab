@@ -3,6 +3,16 @@ import type {
   AgentInspectionResponse,
   AuthorizedProject,
 } from "@blocklab/core";
+import {
+  LOCAL_RUNTIME_PROTOCOL_VERSION,
+  LOCAL_RUNTIME_SERVICE,
+  ProtocolValidationError,
+  parseAuthorizedProjectsResponse,
+  parseInspectionResponse,
+  parseLocalRuntimeHealth,
+  parsePairResponse,
+  parseRuntimeErrorEnvelope,
+} from "@blocklab/core";
 
 export type AgentConnectionState =
   | "disconnected"
@@ -34,6 +44,27 @@ function messageFrom(error: unknown): string {
     : "The Local Agent request failed.";
 }
 
+function normalizeLoopbackEndpoint(endpoint: string): string {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error("Enter a valid Local Runtime endpoint.");
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "127.0.0.1" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error("Local Runtime endpoints must use HTTP on 127.0.0.1.");
+  }
+  return url.origin;
+}
+
 export function createStudioAgentClient(
   fetcher: typeof fetch = fetch,
 ): StudioAgentClient {
@@ -51,34 +82,56 @@ export function createStudioAgentClient(
     state = next;
     publish();
   };
-  const request = async <T>(
+  const request = async (
     path: string,
     init: RequestInit = {},
-  ): Promise<T> => {
+  ): Promise<unknown> => {
     const response = await fetcher(`${state.endpoint}${path}`, {
       ...init,
       headers: {
-        "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        accept: "application/json",
+        ...(init.body === undefined
+          ? {}
+          : { "content-type": "application/json" }),
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
         ...(init.headers ?? {}),
       },
     });
-    const payload = (await response.json()) as
-      | T
-      | { error?: { message?: string } };
-    if (!response.ok) {
-      const errorPayload = payload as { error?: { message?: string } };
-      throw new Error(
-        errorPayload.error?.message ?? "The Local Agent rejected the request.",
-      );
+    let payload: unknown;
+    try {
+      payload = (await response.json()) as unknown;
+    } catch {
+      throw new Error("Local Runtime returned an invalid JSON response.");
     }
-    return payload as T;
+    if (!response.ok) {
+      try {
+        const errorPayload = parseRuntimeErrorEnvelope(payload);
+        throw new Error(errorPayload.error.message);
+      } catch (error) {
+        if (error instanceof ProtocolValidationError) {
+          throw new Error("The Local Runtime rejected the request.");
+        }
+        throw error;
+      }
+    }
+    return payload;
   };
 
   return {
     getState: () => state,
     async pair(endpoint, code): Promise<void> {
-      const normalized = endpoint.replace(/\/+$/, "");
+      let normalized: string;
+      try {
+        normalized = normalizeLoopbackEndpoint(endpoint);
+      } catch (error) {
+        update({
+          ...state,
+          connection: "error",
+          error: messageFrom(error),
+        });
+        return;
+      }
+      token = undefined;
       update({
         ...state,
         endpoint: normalized,
@@ -86,15 +139,32 @@ export function createStudioAgentClient(
         error: undefined,
       });
       try {
-        const health = await request<AgentHealth>("/health");
-        const paired = await request<{ token: string }>("/pair", {
-          method: "POST",
-          body: JSON.stringify({ code }),
-        });
-        token = paired.token;
-        const listed = await request<{
-          projects: readonly AuthorizedProject[];
-        }>("/projects");
+        const runtimeHealth = parseLocalRuntimeHealth(
+          await request("/v1/health"),
+        );
+        const paired = parsePairResponse(
+          await request("/v1/pair", {
+            method: "POST",
+            body: JSON.stringify({
+              pairingCode: code,
+              protocolVersions: [LOCAL_RUNTIME_PROTOCOL_VERSION],
+            }),
+          }),
+        );
+        if (paired.runtimeId !== runtimeHealth.runtimeId) {
+          throw new Error("Local Runtime identity changed during pairing.");
+        }
+        token = paired.accessToken;
+        const listed = parseAuthorizedProjectsResponse(
+          await request("/v1/projects"),
+        );
+        const health: AgentHealth = {
+          service: LOCAL_RUNTIME_SERVICE,
+          protocolVersion: LOCAL_RUNTIME_PROTOCOL_VERSION,
+          agentId: runtimeHealth.runtimeId,
+          status: "ready",
+          authorizedProjectCount: listed.projects.length,
+        };
         update({
           ...state,
           endpoint: normalized,
@@ -124,9 +194,11 @@ export function createStudioAgentClient(
       }
       update({ ...state, selectedProjectId: projectId, error: undefined });
       try {
-        const result = await request<AgentInspectionResponse>(
-          `/projects/${encodeURIComponent(projectId)}/inspect`,
-          { method: "POST" },
+        const result = parseInspectionResponse(
+          await request(
+            `/v1/projects/${encodeURIComponent(projectId)}/inspect`,
+            { method: "POST", body: "{}" },
+          ),
         );
         update({
           ...state,
@@ -141,7 +213,7 @@ export function createStudioAgentClient(
     async revoke(): Promise<void> {
       if (token !== undefined) {
         try {
-          await request("/revoke", { method: "POST" });
+          await request("/v1/session", { method: "DELETE" });
         } catch {
           // Local state is revoked even if the agent has gone offline.
         }

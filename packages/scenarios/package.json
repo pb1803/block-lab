@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./registry": "./src/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

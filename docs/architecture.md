@@ -13,6 +13,26 @@
 - `@blocklab/arkiv-metadata` is the platform-neutral Arkiv record contract: schema version, allowlisted experiment metadata, strict validation, and canonical payload bytes plus digest. It has no dependencies and no I/O, so the CLI, the runner and the browser POC can all import it.
 - `apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It is the only workspace that imports `@arkiv-network/sdk`, uses a connected EIP-1193 wallet for signing, and writes one compact `blocklab.experiment` entity on the Rabdi testnet. The CLI, runner, core and Studio do not depend on it.
 
+### Distribution and deployment
+
+The workspace CLI depends on `core`, `inspector`, `scenarios`, `runner`, and
+`evidence`; `pnpm build` bundles these internal modules into a standalone
+Node.js executable in the generated npm staging package at
+`apps/cli/dist/npm`. The package contains no unresolved workspace dependencies
+or third-party runtime dependencies. It requires Node.js 24 or newer.
+
+The CLI owns an ephemeral loopback proxy for each CLI-driven experiment and
+closes it through the runner lifecycle. It is not a persistent proxy for
+external dApp traffic. The Local Agent remains a separate inspect-only
+workspace process and is not included in the npm package.
+
+Studio is deployed as a static Vite application from `apps/studio/dist-app`.
+The Vercel configuration builds the Studio package and its workspace
+dependencies from the repository root. Studio can manually pair with and
+inspect a Local Agent, but there is no agent discovery or experiment
+execution/status/evidence protocol. The Local Agent's origin allowlist is
+currently suited to local Studio development, not a deployed Vercel origin.
+
 ## Dependency direction
 
 ```text

@@ -6,6 +6,7 @@
     { "path": "./packages/scenarios" },
     { "path": "./packages/runner" },
     { "path": "./packages/evidence" },
+    { "path": "./packages/application" },
     { "path": "./packages/rpc-probe" },
     { "path": "./packages/browser-rpc" },
     { "path": "./packages/arkiv-metadata" },

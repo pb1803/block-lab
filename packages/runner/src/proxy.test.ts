@@ -118,8 +118,10 @@ describe("local RPC proxy", () => {
   });
 
   it("rejects malformed, batched, unsupported, oversized, and credentialed requests", async () => {
+    let forwarded = 0;
     const upstream = await listen(
       createServer((request, response) => {
+        forwarded += 1;
         request.resume();
         response.end("{}");
       }),
@@ -142,6 +144,25 @@ describe("local RPC proxy", () => {
       id: 2,
       method: "eth_sendRawTransaction",
     });
+    const signingMethods = await Promise.all(
+      ["eth_sign", "eth_signTypedData_v4", "eth_signTransaction"].map(
+        (method, index) =>
+          rpc(address.url, {
+            jsonrpc: "2.0",
+            id: index + 4,
+            method,
+          }),
+      ),
+    );
+    const unsupportedMethods = await Promise.all(
+      ["evm_mine", "anvil_reset", "unknown_method"].map((method, index) =>
+        rpc(address.url, {
+          jsonrpc: "2.0",
+          id: index + 7,
+          method,
+        }),
+      ),
+    );
     const oversized = await rpc(address.url, {
       jsonrpc: "2.0",
       id: 3,
@@ -152,6 +173,13 @@ describe("local RPC proxy", () => {
     expect(invalidJson.status).toBe(400);
     expect(batch.status).toBe(400);
     expect(unsupported.json.error).toMatchObject({ code: -32601 });
+    expect(signingMethods.map((result) => result.json.error)).toEqual(
+      signingMethods.map(() => expect.objectContaining({ code: -32601 })),
+    );
+    expect(unsupportedMethods.map((result) => result.json.error)).toEqual(
+      unsupportedMethods.map(() => expect.objectContaining({ code: -32601 })),
+    );
+    expect(forwarded).toBe(0);
     expect(oversized.status).toBe(413);
     expect(
       () => new RpcProxy({ upstreamUrl: "http://user:pass@127.0.0.1:8545" }),

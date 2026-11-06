@@ -41,17 +41,18 @@ execution; Studio never issues a request. Once a valid comparison is displayed,
 **Export JSON** in that panel downloads a redacted `blocklab.rpc-comparison`
 schema `1.0` artifact labelled `complete`, `incomplete`, or `failed`.
 
-The local experiment flow is:
+The intended local developer flow is:
 
 ```text
-sample dApp -> configurable RPC endpoint -> BLOCKLAB local proxy -> Anvil
+sample dApp -> BLOCKLAB proxy -> Anvil
 ```
 
-Start the proxy as part of a runner experiment and point the sample at the
-reported local proxy URL. The proxy has no hosted mode and only accepts a
-loopback upstream. Its blackout window is deterministic and closes during
-runner cleanup. Full CLI orchestration and application-level evaluation remain
-later phases.
+The sample currently does not run through a persistent BLOCKLAB proxy. The
+CLI's `test` command starts a loopback proxy for its own controlled workload,
+then closes it as part of experiment cleanup; it does not expose a URL for a
+browser dApp to use concurrently. See
+[distribution and deployment readiness](distribution-and-deployment.md) for
+the current developer journey and this integration blocker.
 
 ## Start Anvil
 
@@ -126,8 +127,10 @@ the failure is shown with the harness message and no direct request is made.
   scope. See [anon-rpc-poc.md](anon-rpc-poc.md).
 - The proxy currently rejects JSON-RPC batches and transaction/signing methods.
 - The runner does not forcibly terminate an uncooperative asynchronous task.
-- Full `blocklab test rpc-blackout` orchestration and evaluator are planned for
-  later phases.
+- The CLI can run `blocklab test rpc-blackout` and the other supported scenarios
+  against an explicit loopback upstream. It exercises its own bounded
+  `eth_chainId` workload and does not yet orchestrate requests from the sample
+  dApp.
 
 ## Phase 10 evidence
 

@@ -24,6 +24,7 @@
     "@blocklab/arkiv-metadata": "workspace:*",
     "@blocklab/browser-rpc": "workspace:*",
     "@blocklab/core": "workspace:*",
+    "@blocklab/scenarios": "workspace:*",
     "viem": "2.57.16"
   },
   "devDependencies": {

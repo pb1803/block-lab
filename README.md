@@ -285,7 +285,13 @@ the default is `%APPDATA%\blocklab\evidence`; on macOS it is
 `$XDG_DATA_HOME/blocklab/evidence` or `~/.local/share/blocklab/evidence`.
 
 The package is prepared for a future npm publication as `blocklab`, but it has
-not been published.
+not been published. `pnpm build` now stages the standalone CLI package at
+`apps/cli/dist/npm`; it bundles the local experiment runtime and excludes
+workspace dependencies from the distributable package. Preview it with
+`npm pack --dry-run ./apps/cli/dist/npm`. See
+[distribution and deployment readiness](docs/distribution-and-deployment.md)
+for package verification, Vercel settings, and remaining Studio-to-agent
+limitations.
 
 The Phase 07 sample dApp and local Anvil instructions are documented in
 [docs/sample-dapp.md](docs/sample-dapp.md).

@@ -1,35 +1,27 @@
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { type ExperimentSchedule, runExperiment } from "@blocklab/application";
 import {
   type BlackoutSchedule,
   type ConnectionFailureSchedule,
   compareEvidence,
-  createRpcBlackoutEvidence,
-  createRpcConnectionFailureEvidence,
-  createRpcIntermittentFailureEvidence,
-  createRpcLatencyEvidence,
-  createRpcMalformedResponseEvidence,
-  createRpcRateLimitEvidence,
   type EvidenceComparison,
   type EvidenceRecord,
   EvidenceValidationError,
   type IntermittentFailureSchedule,
   type LatencySchedule,
   type MalformedResponseSchedule,
-  type ProxyEvidenceLike,
   type RateLimitSchedule,
   readEvidence,
   toJsonReport,
   toReplayConfiguration,
-  writeEvidence,
 } from "@blocklab/evidence";
 import {
   InspectionError,
   type InspectionSummary,
   inspectProject,
 } from "@blocklab/inspector";
-import { RpcProxy, startExecution } from "@blocklab/runner";
 import {
   rpcBlackoutScenario,
   rpcConnectionFailureScenario,
@@ -37,7 +29,6 @@ import {
   rpcLatencyScenario,
   rpcMalformedResponseScenario,
   rpcRateLimitScenario,
-  validateScenarioMode,
 } from "@blocklab/scenarios";
 
 export const CLI_VERSION = "0.1.0";
@@ -80,21 +71,8 @@ export interface CliConfig {
   readonly precedence: readonly string[];
 }
 
-const scenarioDefinitionMap = {
-  "rpc-blackout": rpcBlackoutScenario,
-  "rpc-latency": rpcLatencyScenario,
-  "rpc-intermittent-failure": rpcIntermittentFailureScenario,
-  "rpc-rate-limit": rpcRateLimitScenario,
-  "rpc-connection-failure": rpcConnectionFailureScenario,
-  "rpc-malformed-response": rpcMalformedResponseScenario,
-} as const satisfies Record<SupportedScenario, typeof rpcBlackoutScenario>;
-
 function isSupportedScenario(value: string): value is SupportedScenario {
-  return value in scenarioDefinitionMap;
-}
-
-function scenarioDefinition(value: SupportedScenario) {
-  return scenarioDefinitionMap[value];
+  return SUPPORTED_SCENARIOS.includes(value as SupportedScenario);
 }
 
 function parseArgs(args: readonly string[]): ParsedArgs {
@@ -234,6 +212,7 @@ function printHumanInspection(
 function printHelp(output: (value: string) => void): void {
   output(`BLOCKLAB ${CLI_VERSION}\n\n`);
   output("Usage:\n");
+  output("  blocklab scenarios [--json]\n");
   output("  blocklab inspect [directory] [--json]\n");
   output("  blocklab test rpc-blackout --upstream <loopback-url> [options]\n");
   output("  blocklab test rpc-latency --upstream <loopback-url> [options]\n");
@@ -375,51 +354,7 @@ function printEvaluation(
   output(`Limitations: ${evidence.limitations.join(" | ")}\n`);
 }
 
-type ScenarioSchedule =
-  | {
-      readonly startOffsetMs: number;
-      readonly durationMs: number;
-      readonly experimentDurationMs: number;
-    }
-  | {
-      readonly delayMs: number;
-      readonly startOffsetMs: number;
-      readonly durationMs: number;
-      readonly experimentDurationMs: number;
-    }
-  | {
-      readonly startOffsetMs: number;
-      readonly failureDurationMs: number;
-      readonly recoveryIntervalMs: number;
-      readonly windowCount: number;
-      readonly experimentDurationMs?: number;
-      readonly httpStatus?: number;
-    }
-  | {
-      readonly maxRequests: number;
-      readonly windowMs: number;
-      readonly cooldownMs?: number;
-      readonly retryAfterSeconds?: number;
-      readonly experimentDurationMs?: number;
-    }
-  | {
-      readonly faultMode: "connection-reset" | "premature-close";
-      readonly startOffsetMs: number;
-      readonly durationMs: number;
-      readonly experimentDurationMs?: number;
-    }
-  | {
-      readonly faultMode:
-        | "invalid-json"
-        | "missing-version"
-        | "missing-result-and-error"
-        | "missing-id"
-        | "mismatched-id"
-        | "invalid-structure";
-      readonly startOffsetMs: number;
-      readonly durationMs: number;
-      readonly experimentDurationMs?: number;
-    };
+type ScenarioSchedule = ExperimentSchedule;
 
 async function executeExperiment(
   directory: string,
@@ -430,311 +365,15 @@ async function executeExperiment(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<EvidenceRecord> {
-  validateScenarioMode(scenarioDefinition(scenario), "local");
-  let proxy: RpcProxy | undefined;
-  let experimentStartedAt: string | undefined;
-  const handle = startExecution(
-    {
-      scenarioId: scenario,
-      timeoutMs,
-      target: upstream,
-      parameters: schedule,
-    },
-    async (context) => {
-      let proxyConfig: ConstructorParameters<typeof RpcProxy>[0];
-      switch (scenario) {
-        case "rpc-blackout": {
-          const blackoutSchedule = schedule as Extract<
-            ScenarioSchedule,
-            { startOffsetMs: number; durationMs: number }
-          >;
-          if ("delayMs" in blackoutSchedule) {
-            throw new CliError(
-              "Latency configuration cannot run as rpc-blackout.",
-            );
-          }
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            blackout: blackoutSchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        case "rpc-latency": {
-          const latencySchedule = schedule as Extract<
-            ScenarioSchedule,
-            { delayMs: number }
-          >;
-          if (!("delayMs" in latencySchedule)) {
-            throw new CliError("Latency configuration requires --delay.");
-          }
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            latency: latencySchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        case "rpc-intermittent-failure": {
-          const intermittentSchedule = schedule as Extract<
-            ScenarioSchedule,
-            { startOffsetMs: number; failureDurationMs: number }
-          >;
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            intermittent: intermittentSchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        case "rpc-rate-limit": {
-          const rateLimitSchedule = schedule as Extract<
-            ScenarioSchedule,
-            { maxRequests: number; windowMs: number }
-          >;
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            rateLimit: rateLimitSchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        case "rpc-connection-failure": {
-          const connectionFailureSchedule = schedule as Extract<
-            ScenarioSchedule,
-            { faultMode: "connection-reset" | "premature-close" }
-          >;
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            connectionFailure: connectionFailureSchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        case "rpc-malformed-response": {
-          const malformedResponseSchedule = schedule as Extract<
-            ScenarioSchedule,
-            { faultMode: string }
-          >;
-          proxyConfig = {
-            upstreamUrl: upstream,
-            port,
-            malformed: malformedResponseSchedule,
-            executionId: context.executionId,
-            scenarioId: scenario,
-          } as ConstructorParameters<typeof RpcProxy>[0];
-          break;
-        }
-        default:
-          throw new CliError(`Unsupported scenario: ${scenario}.`);
-      }
-      proxy = new RpcProxy(proxyConfig);
-      await proxy.start();
-      experimentStartedAt = proxy.experimentStartedAt;
-      context.registerCleanup("rpc-proxy", () => proxy?.close());
-      const address = proxy.listeningAddress;
-      if (address === undefined) throw new CliError("Proxy did not start.");
-      const request = (): Promise<Response> =>
-        fetch(address.url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "eth_chainId",
-            params: [],
-          }),
-          signal: context.cancellationSignal,
-        });
-      const baselineDelay =
-        "startOffsetMs" in schedule ? schedule.startOffsetMs : 0;
-      const waitUntilElapsed = async (targetMs: number): Promise<void> => {
-        const startedAtMs = Date.parse(
-          experimentStartedAt ?? context.startedAt ?? new Date().toISOString(),
-        );
-        const remainingMs = targetMs - (Date.now() - startedAtMs);
-        if (remainingMs > 0) {
-          await new Promise<void>((resolvePromise) =>
-            setTimeout(resolvePromise, remainingMs),
-          );
-        }
-      };
-      await request();
-      if (scenario === "rpc-rate-limit") {
-        const rateLimitSchedule = schedule as Extract<
-          ScenarioSchedule,
-          { maxRequests: number }
-        >;
-        for (
-          let index = 0;
-          index < Math.max(2, rateLimitSchedule.maxRequests);
-          index += 1
-        ) {
-          await request();
-        }
-        await new Promise<void>((resolvePromise) =>
-          setTimeout(resolvePromise, rateLimitSchedule.windowMs),
-        );
-        if (!context.cancellationSignal.aborted) await request();
-      } else if (scenario === "rpc-intermittent-failure") {
-        const intermittentSchedule = schedule as Extract<
-          ScenarioSchedule,
-          { failureDurationMs: number }
-        >;
-        await waitUntilElapsed(baselineDelay);
-        for (
-          let index = 0;
-          index < intermittentSchedule.windowCount &&
-          !context.cancellationSignal.aborted;
-          index += 1
-        ) {
-          await request();
-          await new Promise<void>((resolvePromise) =>
-            setTimeout(resolvePromise, intermittentSchedule.failureDurationMs),
-          );
-          if (!context.cancellationSignal.aborted) await request();
-          if (index + 1 < intermittentSchedule.windowCount) {
-            await new Promise<void>((resolvePromise) =>
-              setTimeout(
-                resolvePromise,
-                intermittentSchedule.recoveryIntervalMs,
-              ),
-            );
-          }
-        }
-      } else {
-        await waitUntilElapsed(baselineDelay);
-        if (scenario === "rpc-connection-failure") {
-          try {
-            await request();
-          } catch (error) {
-            if (
-              proxy.evidence.at(-1)?.outcome !== "injected_connection_failure"
-            ) {
-              throw error;
-            }
-          }
-        } else {
-          await request();
-        }
-        const faultDuration =
-          "durationMs" in schedule
-            ? schedule.durationMs
-            : "failureDurationMs" in schedule
-              ? schedule.failureDurationMs
-              : 100;
-        await new Promise<void>((resolvePromise) =>
-          setTimeout(resolvePromise, faultDuration),
-        );
-        if (!context.cancellationSignal.aborted) await request();
-      }
-      return proxy.evidence;
-    },
-  );
-  const onAbort = (): void => {
-    handle.context.requestCancellation();
-  };
-  signal?.addEventListener("abort", onAbort, { once: true });
-  const result = await handle.result;
-  signal?.removeEventListener("abort", onAbort);
-  const records = (
-    Array.isArray(result.value) ? result.value : (proxy?.evidence ?? [])
-  ) as readonly ProxyEvidenceLike[];
-  const execution = {
-    executionId: result.executionId,
-    state:
-      result.state === "completed" ||
-      result.state === "failed" ||
-      result.state === "cancelled" ||
-      result.state === "timed_out"
-        ? result.state
-        : "failed",
-    ...(experimentStartedAt === undefined &&
-    handle.context.startedAt === undefined
-      ? {}
-      : { startedAt: experimentStartedAt ?? handle.context.startedAt }),
-    ...(handle.context.finishedAt === undefined
-      ? {}
-      : { finishedAt: handle.context.finishedAt }),
-  } as const;
-  const warnings =
-    result.cleanupFailures.length > 0
-      ? ["One or more cleanup handlers failed."]
-      : [];
-  const evidence = (() => {
-    switch (scenario) {
-      case "rpc-blackout": {
-        const blackoutSchedule = schedule as BlackoutSchedule;
-        if ("delayMs" in blackoutSchedule) {
-          throw new CliError(
-            "Latency configuration cannot create blackout evidence.",
-          );
-        }
-        return createRpcBlackoutEvidence(execution, blackoutSchedule, records, {
-          warnings,
-        });
-      }
-      case "rpc-latency": {
-        const latencySchedule = schedule as LatencySchedule;
-        if (!("delayMs" in latencySchedule)) {
-          throw new CliError("Latency evidence requires a delay.");
-        }
-        return createRpcLatencyEvidence(execution, latencySchedule, records, {
-          warnings,
-        });
-      }
-      case "rpc-intermittent-failure": {
-        const intermittentSchedule = schedule as IntermittentFailureSchedule;
-        return createRpcIntermittentFailureEvidence(
-          execution,
-          intermittentSchedule,
-          records,
-          { warnings },
-        );
-      }
-      case "rpc-rate-limit": {
-        const rateLimitSchedule = schedule as RateLimitSchedule;
-        return createRpcRateLimitEvidence(
-          execution,
-          rateLimitSchedule,
-          records,
-          { warnings },
-        );
-      }
-      case "rpc-connection-failure": {
-        const connectionFailureSchedule = schedule as ConnectionFailureSchedule;
-        return createRpcConnectionFailureEvidence(
-          execution,
-          connectionFailureSchedule,
-          records,
-          { warnings },
-        );
-      }
-      case "rpc-malformed-response": {
-        const malformedResponseSchedule = schedule as MalformedResponseSchedule;
-        return createRpcMalformedResponseEvidence(
-          execution,
-          malformedResponseSchedule,
-          records,
-          { warnings },
-        );
-      }
-      default:
-        throw new CliError(`Unsupported scenario: ${scenario}.`);
-    }
-  })();
-  await writeEvidence(evidencePath(directory, evidence.executionId), evidence);
-  return evidence;
+  return runExperiment({
+    evidenceDirectory: directory,
+    upstream,
+    scenario,
+    schedule,
+    port,
+    timeoutMs,
+    ...(signal === undefined ? {} : { signal }),
+  });
 }
 
 function printComparison(
@@ -801,20 +440,24 @@ export async function runCli(
       return EXIT_CODES.success;
     }
     if (command === "scenarios") {
-      stdout(
-        `${JSON.stringify(
-          [
-            rpcBlackoutScenario,
-            rpcLatencyScenario,
-            rpcIntermittentFailureScenario,
-            rpcRateLimitScenario,
-            rpcConnectionFailureScenario,
-            rpcMalformedResponseScenario,
-          ],
-          null,
-          2,
-        )}\n`,
-      );
+      const scenarios = [
+        rpcBlackoutScenario,
+        rpcLatencyScenario,
+        rpcIntermittentFailureScenario,
+        rpcRateLimitScenario,
+        rpcConnectionFailureScenario,
+        rpcMalformedResponseScenario,
+      ];
+      if (json) stdout(`${JSON.stringify(scenarios, null, 2)}\n`);
+      else {
+        stdout("Supported local scenarios:\n");
+        for (const scenario of scenarios) {
+          stdout(
+            `- ${scenario.scenarioId} (${scenario.version}) — ${scenario.name}: ${scenario.description}\n`,
+          );
+        }
+        stdout("All scenarios require an explicit loopback RPC upstream.\n");
+      }
       return EXIT_CODES.success;
     }
     const evidenceDirectory = option(parsed, "evidence-dir");

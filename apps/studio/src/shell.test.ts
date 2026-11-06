@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentStatusPresentation,
   hashForRoute,
   routeFromHash,
   type StudioRoute,
@@ -30,5 +31,34 @@ describe("Studio navigation contract", () => {
     for (const item of studioNavigation) {
       expect(hashForRoute(item.route as StudioRoute)).toBe(`#/${item.route}`);
     }
+  });
+
+  it("keeps all current destinations available without enabling their operations", () => {
+    expect(studioNavigation.map((item) => item.route)).toContain("projects");
+    expect(studioNavigation.map((item) => item.route)).toContain(
+      "evidence-vault",
+    );
+    expect(studioNavigation.map((item) => item.route)).toContain("attack-lab");
+  });
+});
+
+describe("Local Agent status presentation", () => {
+  it.each([
+    ["disconnected", "Local Agent disconnected", "warning"],
+    ["pairing", "Connecting to Local Agent", "info"],
+    ["connected", "Local Agent connected", "success"],
+    ["error", "Local Agent connection error", "error"],
+  ] as const)(
+    "labels %s state with text and a semantic tone",
+    (state, label, tone) => {
+      expect(agentStatusPresentation(state)).toEqual({ label, tone });
+    },
+  );
+
+  it("treats a missing agent as disconnected", () => {
+    expect(agentStatusPresentation(undefined)).toEqual({
+      label: "Local Agent disconnected",
+      tone: "warning",
+    });
   });
 });

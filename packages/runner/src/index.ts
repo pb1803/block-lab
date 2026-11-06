@@ -272,7 +272,42 @@ export type RpcMalformedResponseWorkload<T> = (
 
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 5_000;
-const DISALLOWED_METHOD = /^(eth_send|personal_|wallet_|admin_|debug_)/i;
+const READ_ONLY_RPC_METHODS: ReadonlySet<string> = new Set([
+  "web3_clientVersion",
+  "web3_sha3",
+  "net_listening",
+  "net_peerCount",
+  "net_version",
+  "eth_protocolVersion",
+  "eth_syncing",
+  "eth_chainId",
+  "eth_blockNumber",
+  "eth_getBalance",
+  "eth_getStorageAt",
+  "eth_getTransactionCount",
+  "eth_getBlockTransactionCountByHash",
+  "eth_getBlockTransactionCountByNumber",
+  "eth_getUncleCountByBlockHash",
+  "eth_getUncleCountByBlockNumber",
+  "eth_getCode",
+  "eth_call",
+  "eth_estimateGas",
+  "eth_gasPrice",
+  "eth_feeHistory",
+  "eth_maxPriorityFeePerGas",
+  "eth_getBlockByHash",
+  "eth_getBlockByNumber",
+  "eth_getTransactionByHash",
+  "eth_getTransactionByBlockHashAndIndex",
+  "eth_getTransactionByBlockNumberAndIndex",
+  "eth_getTransactionReceipt",
+  "eth_getUncleByBlockHashAndIndex",
+  "eth_getUncleByBlockNumberAndIndex",
+  "eth_getLogs",
+  "eth_getProof",
+  "eth_getBlockReceipts",
+  "eth_blobBaseFee",
+]);
 
 export interface Runner {
   run(
@@ -1076,7 +1111,7 @@ export class RpcProxy {
       );
       return;
     }
-    if (DISALLOWED_METHOD.test(payload.method)) {
+    if (!READ_ONLY_RPC_METHODS.has(payload.method)) {
       this.record(
         requestInfo,
         "invalid_request",

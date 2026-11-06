@@ -68,12 +68,30 @@ describe("blocklab CLI", () => {
       EXIT_CODES.success,
     );
     expect(help.stdout.join("")).toContain("blocklab test rpc-blackout");
+    expect(help.stdout.join("")).toContain("blocklab scenarios");
 
     const version = capture();
     expect(await runCli(["--version"], version.dependencies)).toBe(
       EXIT_CODES.success,
     );
     expect(version.stdout.join("")).toMatch(/^\d+\.\d+\.\d+\n$/);
+
+    const scenarios = capture();
+    expect(await runCli(["scenarios"], scenarios.dependencies)).toBe(
+      EXIT_CODES.success,
+    );
+    expect(scenarios.stdout.join("")).toContain(
+      "rpc-intermittent-failure (1.0.0)",
+    );
+    expect(scenarios.stdout.join("")).toContain(
+      "explicit loopback RPC upstream",
+    );
+
+    const scenariosJson = capture();
+    expect(
+      await runCli(["scenarios", "--json"], scenariosJson.dependencies),
+    ).toBe(EXIT_CODES.success);
+    expect(JSON.parse(scenariosJson.stdout.join(""))).toHaveLength(6);
 
     const unknown = capture();
     expect(await runCli(["unknown"], unknown.dependencies)).toBe(
@@ -223,11 +241,11 @@ describe("blocklab CLI", () => {
           "--delay",
           "80",
           "--start-offset",
-          "750",
+          "200",
           "--duration",
-          "100",
+          "300",
           "--experiment-duration",
-          "1000",
+          "900",
           "--timeout",
           "2000",
           "--evidence-dir",

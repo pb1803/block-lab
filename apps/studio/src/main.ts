@@ -30,6 +30,7 @@ import {
   switchToRabdi,
 } from "./arkiv/wallet.js";
 import { mountStudioShell, routeFromHash } from "./shell.js";
+import { createThemeController } from "./theme.js";
 
 const root = document.querySelector<HTMLElement>("#studio-root");
 
@@ -38,8 +39,10 @@ if (root === null) {
 }
 
 const agent = createStudioAgentClient();
+const theme = createThemeController({ root: document.documentElement });
 const shell = mountStudioShell(root, routeFromHash(window.location.hash), {
   agent,
+  theme,
 });
 const walletError = document.createElement("div");
 walletError.className = "wallet-error";
@@ -60,6 +63,8 @@ let gateway: ArkivGateway | null =
 let detachWalletEvents: (() => void) | undefined;
 
 const controller = new ArkivController({ gateway: () => gateway });
+controller.subscribe((state) => shell.setArkivState(state));
+shell.setArkivState(controller.state);
 
 function showWalletError(error: unknown): void {
   const classified = classifyError(error);

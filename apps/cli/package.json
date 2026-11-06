@@ -3,15 +3,8 @@
   "version": "0.1.0",
   "description": "Local-first Ethereum dApp resilience testing CLI.",
   "license": "MIT",
-  "private": false,
+  "private": true,
   "type": "module",
-  "files": [
-    "dist/cli.js",
-    "dist/cli.d.ts",
-    "dist/index.js",
-    "dist/index.d.ts",
-    "README.md"
-  ],
   "bin": {
     "blocklab": "./dist/index.js"
   },
@@ -19,13 +12,18 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/blocklab.js && node scripts/prepare-package.mjs"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@blocklab/application": "workspace:*",
     "@blocklab/core": "workspace:*",
     "@blocklab/evidence": "workspace:*",
     "@blocklab/inspector": "workspace:*",
     "@blocklab/runner": "workspace:*",
-    "@blocklab/scenarios": "workspace:*"
+    "@blocklab/scenarios": "workspace:*",
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

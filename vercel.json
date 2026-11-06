@@ -1,0 +1,6 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @blocklab/studio... build",
+  "outputDirectory": "apps/studio/dist-app",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
