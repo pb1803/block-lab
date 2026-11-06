@@ -150,16 +150,17 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 
 - **ARK-01 DONE**: `@arkiv-network/sdk@1.0.1` + viem `2.57.16` in `apps/arkiv-poc` only; package and live Rabdi facts verified (`0x76edaf`, 2 s blocks).
 - **ARK-02 DONE**: no private key in source; signing is wallet-side EIP-1193; access key optional and git-ignored.
-- **ARK-03 BLOCKED (awaiting faucet)**: the harness is ready and idempotent
-  (`poc-write-001`, live duplicate preflight shared with the gateway, post-failure
-  re-check, no blind retry) and was run against the real chain (blocked at
-  `0 tGLM`, exit 2, nothing signed). Prepared signer (rotated after an
-  exposure report; old address retired):
+- **ARK-03 READY (pre-verified, awaiting explicit approval)**: the harness is
+  idempotent (`poc-write-001`, live duplicate preflight shared with the gateway,
+  post-failure re-check, no blind retry). The rotated signer
   `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` (key in git-ignored
-  `apps/arkiv-poc/.env.local`). The official faucet needs a browser wallet
-  session + captcha (24 h cooldown) — a human step. Anonymous `arkiv_query`
-  budget intermittently 429s (`ANON_COST_LIMITED`); an access key removes it.
-  No tx hash/entity key exists; nothing is claimed.
+  `apps/arkiv-poc/.env.local`) now holds `5 tGLM` — funding transfer
+  `0x79513168f51255074564bdd79bff0ce72071fe4be6f62a6b1d74c94899611f1a` verified
+  on-chain (block 268498, receipt success, gas 21000) — and
+the access key is configured. `scripts/prepub-check.mjs` reports
+  8/8 PASS live and read-only. No write transaction has been signed yet; the
+  first publication runs only after explicit approval. No tx hash of a write or
+  entity key exists; nothing is claimed.
 - **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. An indexed `blocklab.experiment` record was not written.
 - **ARK-05 PARTIAL**: `owner == creator` observed on public `posts` entities; no two-wallet experiment.
 - **ARK-06 NOT-VERIFIED**: SDK expiry semantics read only; no live expired-record observation.

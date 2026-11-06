@@ -4,20 +4,19 @@
 
 Phase 14 built an isolated browser POC for the Arkiv sponsor integration and
 verified the network, the SDK and the read path **live on the Rabdi testnet**.
-The real entity write did **not** happen: the testnet faucet needs a connected
-browser wallet, the harness signer holds `0 tGLM`, and nothing was signed. The
-browser write path was therefore verified only up to the wallet's signature
-request, with a deliberately mock wallet that rejects it.
+The real entity write had **not** happened at that point (the harness signer
+held `0 tGLM`), so the browser write path was verified only up to the wallet's
+signature request, with a deliberately mock wallet that rejects it.
 
 **Phase 14B** (2026-11-05) prepared the environment for the first real
-publication and hardened the harness so it can never blind-retry: a dedicated
-testnet signer is now configured locally (git-ignored), the write harness
-runs a live duplicate preflight before signing and a post-failure re-check
-instead of re-signing, and the official faucet/access-key flows were verified.
-The remaining step is human: fund the prepared signer through the official
-faucet. **No real transaction has been signed, and no transaction hash or
-entity key exists.** `try-write.mjs` exits with code `2` (blocked) rather than
-fabricating a result.
+publication. The signer was rotated after an exposure report, funded with
+`5 tGLM` (on-chain transfer verified), and an Arkiv access key is configured
+locally. All eight pre-publication checks pass live and read-only
+(`scripts/prepub-check.mjs`: funding transaction, balance, key/address match,
+secret hygiene, access keys, authenticated RPC, duplicate preflight, funds).
+**No real transaction has been signed yet, and no entity key exists:** the
+publication runs only after explicit approval. Nothing below claims a write
+that did not happen.
 
 Nothing in this document claims a write, a transaction hash, an entity key, an
 ownership experiment or an expiry experiment that did not happen.
@@ -36,7 +35,7 @@ funded or used:
 | Item | Value |
 |---|---|
 | Signer address | `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` |
-| Balance (verified live, 2026-11-05) | `0 tGLM` |
+| Balance (verified live, 2026-11-05) | `5 tGLM` |
 | Where the key lives | `apps/arkiv-poc/.env.local` (`ARKIV_PRIVATE_KEY`, git-ignored) |
 
 ### Faucet (funding) — verified, human step
@@ -78,7 +77,24 @@ https://docs.arkiv.network/start-here/access-keys/):
   (`ARKIV_ACCESS_KEY` for the harness, `VITE_ARKIV_ACCESS_KEY` for the browser
   build).
 
-### After funding: exact verification command
+### Pre-publication verification — 8/8 PASS (2026-11-05)
+
+`scripts/prepub-check.mjs` runs the eight gates read-only: it signs nothing and
+sends no transaction. Run it from `apps/arkiv-poc`:
+
+```bash
+pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/prepub-check.mjs
+```
+
+The funding transfer was located by scanning recent blocks, because Rabdi
+serves state at the head only (no historical `eth_getBalance`) and the
+explorer's transaction index lists Arkiv entity transactions, not native value
+transfers. Verified funding transaction:
+`0x79513168f51255074564bdd79bff0ce72071fe4be6f62a6b1d74c94899611f1a`
+(block `268498`, `2026-11-05T23:52:36Z`, `5.000000 tGLM`, receipt status
+success, gas used `21000`) — the full balance, from a single deposit.
+
+### Publication command (not run yet)
 
 ```bash
 pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/try-write.mjs
@@ -280,6 +296,29 @@ exit=2
 This is a genuine read of Rabdi (chain id, `arkiv_query`, `eth_getBalance`)
 followed by a refusal to sign, not a mocked test.
 
+### Pre-publication verification (Phase 14B, 2026-11-05)
+
+`node --env-file=.env.local scripts/prepub-check.mjs` — read-only, authenticated
+with the access key, signs nothing:
+
+```text
+PASS  3. signer derivation: derived 0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759 (expected 0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759)
+PASS  5. access keys configured: both set and equal (41 chars), distinct from the private key; values not printed
+PASS  4. .env.local ignored, nothing secret staged: ignored=true tracked=false stagedEnvFiles=none
+PASS  6. authenticated RPC connectivity: chain 7794095 (expected 7794095), head block 268990, arkiv_query 3/3 rounds ok (no 429/401)
+PASS  2. live signer balance: 5.000000 tGLM (5000000000000000000 wei)
+PASS  1. funding transaction: block 268498 (2026-11-05T23:52:36.000Z) tx 0x79513168f51255074564bdd79bff0ce72071fe4be6f62a6b1d74c94899611f1a from 0xd431714db82331b07697ea4675334c3af6d2ebe9 value 5.000000 tGLM = full balance (single deposit) status success, gas used 21000
+PASS  7. duplicate preflight: experimentId "poc-write-001": no existing entity, safe to create
+PASS  8. funds sufficient for one publication: gas price 1000000000 wei; realistic ~32812 gas = 0.000033 tGLM; SDK worst-case cap 0.016777 tGLM; balance 5.000000 tGLM (covers the worst case)
+
+SUMMARY 8/8 checks passed — ready to publish on explicit approval.
+```
+
+The funds check is bounded by the SDK's own constants: `MAX_TRANSACTION_GAS`
+(`2^24` gas) with the 25 % headroom the SDK applies, so `5 tGLM` covers even
+the worst-case cap. The expected cost of one publication is about
+`0.000033 tGLM` at a `1 gwei` gas price.
+
 ### Unit tests
 
 * `packages/arkiv-metadata`: 41 tests (schema, strict validation, canonical
@@ -293,22 +332,17 @@ followed by a refusal to sign, not a mocked test.
 
 ## Blockers (honest state)
 
-1. **No real entity write — awaiting one human faucet claim.** The harness and
-   the POC are ready, but the prepared signer
-   `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` still holds `0 tGLM`.
-   The official faucet requires a browser wallet session, a captcha and a
-   cooldown (default 24 hours), so it cannot be completed from this
-   environment; no bypass was attempted. Consequence: there is no real
-   transaction hash, no real entity key and no explorer link yet. Once the
-   faucet claim lands, one command completes and verifies the publication
-   (see above).
-2. **Anonymous query budget exhausted.** Without an access key the public
-   endpoint answers `arkiv_query` with HTTP 429 and
-   `{"error":"ANON_COST_LIMITED","message":"unauthenticated query budget exhausted;
-   get an API key at https://hub.arkiv.network for a monthly quota"}`. Reads
-   therefore need `VITE_ARKIV_ACCESS_KEY` for repeated runs. The POC surfaces this
-   as a fast `[network]` error and refuses to continue a write whose duplicate
-   check could not run.
+1. **The publication itself has not run.** Funding was the only real blocker
+   and it is cleared (signer `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` holds
+   `5 tGLM`); publication waits for explicit approval, so there is still no real
+   transaction hash of a write and no entity key. Once approved, one command
+   completes and verifies the publication (see above).
+2. **Anonymous query budget — mitigated by the access key.** Without a key the
+   public endpoint answers `arkiv_query` with HTTP 429 and
+   `{"error":"ANON_COST_LIMITED",...}`. With `ARKIV_ACCESS_KEY` configured the
+   same reads return consistently (3/3 rounds in the check above). The POC still
+   surfaces a failed duplicate check as a fast `[network]` error and refuses to
+   continue a write whose duplicate check could not run.
 3. **Owner/creator semantics not experimentally verified.** Only observed
    indirectly on public `posts` entities, where `owner == creator == author`. No
    two-wallet experiment (write as A, read as B, change ownership) was run, so no
@@ -329,6 +363,9 @@ node scripts/arkiv-net-check.mjs             # live read-only check
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/?selftest=1 --mode self-test
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/ --mode wallet-mismatch
 node scripts/arkiv-poc-check.mjs --url http://127.0.0.1:5177/ --mode wallet-reject
+
+# live read-only pre-publication gates (8 checks; signs nothing)
+pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/prepub-check.mjs
 
 # real publication (needs a funded signer in .env.local; safe to re-run)
 pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/try-write.mjs
