@@ -76,6 +76,10 @@ export interface StudioShellMount {
   readonly unmount: () => void;
 }
 
+export interface StudioShellOptions {
+  readonly agent?: StudioAgentClient;
+}
+
 export function routeFromHash(hash: string): StudioRoute {
   const value = hash.replace(/^#\/?/, "").split("/")[0];
   return studioNavigation.some((item) => item.route === value)
@@ -133,7 +137,11 @@ function renderPageState(doc: Document, route: StudioRoute): HTMLElement {
   return section;
 }
 
-function renderOverview(doc: Document): HTMLElement {
+function renderOverview(
+  doc: Document,
+  agent: StudioAgentClient | undefined,
+): HTMLElement {
+  const agentState = agent?.getState();
   const section = createElement(doc, "section", "overview-grid");
   section.setAttribute("aria-labelledby", "overview-title");
   const intro = createElement(doc, "div", "overview-intro");
@@ -159,11 +167,20 @@ function renderOverview(doc: Document): HTMLElement {
   const contextLabel = createElement(doc, "p", "card-label");
   contextLabel.textContent = "CURRENT WORKSPACE";
   const contextTitle = createElement(doc, "h3");
-  contextTitle.textContent = "No project selected";
+  contextTitle.textContent =
+    agentState?.inspection?.project.name ?? "No project selected";
   const contextCopy = createElement(doc, "p", "muted");
   contextCopy.textContent =
-    "The browser Studio has no Local Agent connection, so it cannot inspect a filesystem or start a project.";
-  const contextStatus = createStatus(doc, "Agent unavailable", "warning");
+    agentState?.connection === "connected"
+      ? `${agentState.projects.length} explicitly authorized project${agentState.projects.length === 1 ? "" : "s"} available.`
+      : "The browser Studio has no Local Agent connection, so it cannot inspect a filesystem or start a project.";
+  const contextStatus = createStatus(
+    doc,
+    agentState?.connection === "connected"
+      ? "Agent connected"
+      : "Agent unavailable",
+    agentState?.connection === "connected" ? "neutral" : "warning",
+  );
   context.append(contextLabel, contextTitle, contextCopy, contextStatus);
   section.append(intro, context);
 
@@ -197,14 +214,179 @@ function renderOverview(doc: Document): HTMLElement {
     item.append(link, detailNode);
     list.append(item);
   }
+
   next.append(nextTitle, list);
   section.append(next);
   return section;
 }
 
+function renderProjects(
+  doc: Document,
+  agent: StudioAgentClient | undefined,
+): HTMLElement {
+  const section = createElement(doc, "section", "projects-page");
+  section.setAttribute("aria-labelledby", "projects-title");
+  const state = agent?.getState();
+  const heading = createElement(doc, "div", "page-heading");
+  const eyebrow = createElement(doc, "p", "eyebrow");
+  eyebrow.textContent = "PROJECT ONBOARDING";
+  const title = createElement(doc, "h2");
+  title.id = "projects-title";
+  title.textContent = "Connect a project you can inspect.";
+  const description = createElement(doc, "p", "page-lead");
+  description.textContent =
+    "The Local Agent reads manifests and configuration only. It never runs project scripts, installs dependencies, or returns environment-file contents.";
+  heading.append(eyebrow, title, description);
+  section.append(heading);
+
+  const connection = createElement(doc, "div", "agent-card panel");
+  const connectionTitle = createElement(doc, "h3");
+  connectionTitle.textContent = "Local Agent connection";
+  const status = createStatus(
+    doc,
+    state?.connection === "connected"
+      ? "Connected"
+      : state?.connection === "pairing"
+        ? "Pairing…"
+        : state?.connection === "error"
+          ? "Connection error"
+          : "Disconnected",
+    state?.connection === "connected" ? "neutral" : "warning",
+  );
+  const form = createElement(doc, "div", "agent-form");
+  const endpoint = createElement(doc, "input");
+  endpoint.type = "url";
+  endpoint.value = state?.endpoint ?? "http://127.0.0.1:8787";
+  endpoint.placeholder = "http://127.0.0.1:8787";
+  endpoint.setAttribute("aria-label", "Local Agent endpoint");
+  endpoint.dataset.agentEndpoint = "true";
+  const code = createElement(doc, "input");
+  code.type = "text";
+  code.inputMode = "text";
+  code.autocomplete = "one-time-code";
+  code.placeholder = "Pairing code from agent";
+  code.setAttribute("aria-label", "Local Agent pairing code");
+  code.dataset.agentCode = "true";
+  const pair = createElement(doc, "button");
+  pair.type = "button";
+  pair.className = "button button-primary";
+  pair.dataset.agentAction = "pair";
+  pair.textContent =
+    state?.connection === "connected" ? "Reconnect" : "Pair agent";
+  const revoke = createElement(doc, "button");
+  revoke.type = "button";
+  revoke.className = "button button-secondary";
+  revoke.dataset.agentAction = "revoke";
+  revoke.textContent = "Disconnect";
+  revoke.hidden = state?.connection !== "connected";
+  form.append(endpoint, code, pair, revoke);
+  connection.append(connectionTitle, status, form);
+  if (state?.error) {
+    const error = createElement(doc, "p", "inline-error");
+    error.setAttribute("role", "alert");
+    error.textContent = state.error;
+    connection.append(error);
+  }
+  section.append(connection);
+
+  const projectPanel = createElement(doc, "div", "panel project-panel");
+  const projectTitle = createElement(doc, "h3");
+  projectTitle.textContent = "Authorized projects";
+  projectPanel.append(projectTitle);
+  if (state?.connection !== "connected") {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent =
+      "Start the agent with an explicit project directory, then pair it here. Example: pnpm --filter @blocklab/local-agent start -- E:\\path\\to\\dapp";
+    projectPanel.append(empty);
+  } else if (state.projects.length === 0) {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent =
+      "The agent is connected but has no explicitly authorized project.";
+    projectPanel.append(empty);
+  } else {
+    const list = createElement(doc, "div", "project-list");
+    for (const project of state.projects) {
+      list.append(projectCard(doc, project, state.inspection));
+    }
+    projectPanel.append(list);
+  }
+  section.append(projectPanel);
+  return section;
+}
+
+function projectCard(
+  doc: Document,
+  project: AuthorizedProject,
+  inspection: AgentInspectionResponse | undefined,
+): HTMLElement {
+  const card = createElement(doc, "article", "project-card");
+  const title = createElement(doc, "h4");
+  title.textContent = project.name;
+  const root = createElement(doc, "code");
+  root.textContent = project.rootIdentifier;
+  const badge = createStatus(doc, "Explicitly authorized", "neutral");
+  const inspect = createElement(doc, "button");
+  inspect.type = "button";
+  inspect.className = "button button-secondary";
+  inspect.dataset.agentAction = "inspect";
+  inspect.dataset.projectId = project.projectId;
+  inspect.textContent =
+    inspection?.project.projectId === project.projectId
+      ? "Reinspect project"
+      : "Inspect project";
+  card.append(title, root, badge, inspect);
+  if (inspection?.project.projectId === project.projectId) {
+    card.append(renderInspection(doc, inspection));
+  }
+  return card;
+}
+
+function renderInspection(
+  doc: Document,
+  result: AgentInspectionResponse,
+): HTMLElement {
+  const inspection = result.inspection;
+  const details = createElement(doc, "div", "inspection-details");
+  const summary = createElement(doc, "p", "inspection-time");
+  summary.textContent = `Inspected ${new Date(result.inspectedAt).toLocaleString()}`;
+  details.append(summary);
+  for (const [label, value] of [
+    ["Detected stack", inspection.detectedStack.join(", ") || "None detected"],
+    [
+      "Package managers",
+      inspection.packageManagers.join(", ") || "None detected",
+    ],
+    ["Chain IDs", inspection.chainIds.join(", ") || "None detected"],
+    ["Networks", inspection.networkNames.join(", ") || "None detected"],
+    ["RPC references", inspection.rpcReferences.join(", ") || "None detected"],
+  ] as const) {
+    const row = createElement(doc, "div", "inspection-row");
+    const labelNode = createElement(doc, "span", "muted");
+    labelNode.textContent = label;
+    const valueNode = createElement(doc, "strong");
+    valueNode.textContent = value;
+    row.append(labelNode, valueNode);
+    details.append(row);
+  }
+  if (inspection.limitations.length > 0) {
+    const limitations = createElement(doc, "div", "inspection-limitations");
+    const title = createElement(doc, "strong");
+    title.textContent = "Warnings and limitations";
+    limitations.append(title);
+    for (const limitation of inspection.limitations) {
+      const item = createElement(doc, "p");
+      item.textContent = limitation;
+      limitations.append(item);
+    }
+    details.append(limitations);
+  }
+  return details;
+}
+
 export function mountStudioShell(
   container: HTMLElement,
   initialRoute: StudioRoute = "overview",
+  options: StudioShellOptions = {},
 ): StudioShellMount {
   const doc = container.ownerDocument;
   const shell = createElement(doc, "div", "studio-shell");
@@ -296,7 +478,11 @@ export function mountStudioShell(
     history.hidden = !isHistory;
     content.hidden = isHistory;
     content.replaceChildren(
-      route === "overview" ? renderOverview(doc) : renderPageState(doc, route),
+      route === "overview"
+        ? renderOverview(doc, options.agent)
+        : route === "projects"
+          ? renderProjects(doc, options.agent)
+          : renderPageState(doc, route),
     );
     sidebar.classList.remove("mobile-open");
     menuButton.setAttribute("aria-expanded", "false");
@@ -304,12 +490,32 @@ export function mountStudioShell(
   const onClick = (event: Event): void => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    const agentAction = target.closest<HTMLElement>("[data-agent-action]");
+    if (agentAction !== null && options.agent !== undefined) {
+      const action = agentAction.dataset.agentAction;
+      if (action === "pair") {
+        const endpoint = shell.querySelector<HTMLInputElement>(
+          "[data-agent-endpoint]",
+        );
+        const code = shell.querySelector<HTMLInputElement>("[data-agent-code]");
+        if (endpoint !== null && code !== null) {
+          void options.agent.pair(endpoint.value, code.value);
+        }
+      } else if (action === "revoke") {
+        void options.agent.revoke();
+      } else if (action === "inspect") {
+        const projectId = agentAction.dataset.projectId;
+        if (projectId !== undefined) void options.agent.inspect(projectId);
+      }
+      return;
+    }
     const link = target.closest<HTMLAnchorElement>("a[href^='#/']");
-    if (link === null) return;
-    event.preventDefault();
-    const nextRoute = routeFromHash(link.getAttribute("href") ?? "");
-    window.history.replaceState({}, "", hashForRoute(nextRoute));
-    setRoute(nextRoute);
+    if (link !== null) {
+      event.preventDefault();
+      const nextRoute = routeFromHash(link.getAttribute("href") ?? "");
+      window.history.replaceState({}, "", hashForRoute(nextRoute));
+      setRoute(nextRoute);
+    }
   };
   const onHashChange = (): void =>
     setRoute(routeFromHash(window.location.hash));
@@ -320,6 +526,7 @@ export function mountStudioShell(
   shell.addEventListener("click", onClick);
   window.addEventListener("hashchange", onHashChange);
   menuButton.addEventListener("click", onMenuClick);
+  const unsubscribeAgent = options.agent?.subscribe(() => setRoute(route));
   setRoute(initialRoute);
 
   return {
@@ -332,6 +539,13 @@ export function mountStudioShell(
       shell.removeEventListener("click", onClick);
       window.removeEventListener("hashchange", onHashChange);
       menuButton.removeEventListener("click", onMenuClick);
+      unsubscribeAgent?.();
     },
   };
 }
+
+import type {
+  AgentInspectionResponse,
+  AuthorizedProject,
+} from "@blocklab/core";
+import type { StudioAgentClient } from "./agent.js";

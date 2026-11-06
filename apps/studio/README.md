@@ -123,6 +123,12 @@ route. The other destinations intentionally show honest unavailable states
 until their Local Agent and runner workflows are implemented. The shell never
 claims that a Local Agent is connected.
 
+The UI-10 Projects route can pair with the inspect-only Local Agent. Start
+`@blocklab/local-agent` with an explicit project directory; Studio accepts the
+printed short-lived pairing code, lists the authorized project, and requests a
+safe inspector snapshot. Studio does not select arbitrary paths, execute
+scripts, or start experiments.
+
 `src/arkiv/` adds wallet-mediated publish, history search, record details and
 record comparison to Studio. The comparison panel stays **read-only**; the Arkiv
 panel has exactly two write paths, both from an explicit click: Publish (create)

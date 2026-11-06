@@ -492,6 +492,20 @@ comparison surfaces. Projects, Attack Lab, Experiments, Network Intelligence,
 and Settings are intentionally marked unavailable until their safety boundaries
 and data contracts are implemented. No Local Agent was added.
 
+### UI-10 + DEPLOY-01 status (2026-11-06)
+
+The inspect-only Local Agent MVP and Projects workflow are implemented and
+documented in:
+
+- [docs/deploy-01-local-agent.md](docs/deploy-01-local-agent.md)
+- [docs/ui-10-project-workflow.md](docs/ui-10-project-workflow.md)
+
+The agent binds to loopback, uses strict browser Origin validation, short-lived
+in-memory pairing/session credentials, explicit startup directory authorization,
+revocation, and the existing safe inspector. Studio renders actual connection,
+project, and inspection state. Arbitrary command execution, process control,
+GitHub import, cloud runners, and experiment execution remain deferred.
+
 ## Phase 18 — Hardening and security review
 
 1. Run all flows from a clean checkout.

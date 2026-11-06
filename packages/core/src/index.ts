@@ -1,4 +1,5 @@
 export type SourceType = "local" | "github" | "url";
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
 export type TestMode = "local" | "authorized-staging" | "external-observation";
 
@@ -29,6 +30,43 @@ export interface Project {
   readonly detectedStack: readonly string[];
   readonly dependencies: readonly DependencyNode[];
   readonly createdAt: string;
+}
+
+export interface AgentHealth {
+  readonly service: "blocklab-local-agent";
+  readonly protocolVersion: "1";
+  readonly agentId: string;
+  readonly status: "ready";
+  readonly authorizedProjectCount: number;
+}
+
+export interface AuthorizedProject {
+  readonly projectId: string;
+  readonly name: string;
+  readonly rootIdentifier: string;
+  readonly sourceType: "local";
+  readonly authorization: "explicit";
+}
+
+export interface AgentInspectionResponse {
+  readonly project: AuthorizedProject;
+  readonly inspection: InspectionSummary;
+  readonly inspectedAt: string;
+}
+
+export interface InspectionSummary {
+  readonly schemaVersion: "1.0";
+  readonly rootPath: string;
+  readonly manifest: "present" | "missing" | "malformed";
+  readonly packageManagers: readonly PackageManager[];
+  readonly packageManagerConflict: boolean;
+  readonly detectedStack: readonly string[];
+  readonly dependencies: readonly DependencyNode[];
+  readonly edges: readonly DependencyEdge[];
+  readonly chainIds: readonly number[];
+  readonly networkNames: readonly string[];
+  readonly rpcReferences: readonly string[];
+  readonly limitations: readonly string[];
 }
 
 export interface DependencyNode {

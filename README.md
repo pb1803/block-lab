@@ -35,6 +35,13 @@ and hosted services remain out of scope for the current local workflow. Anon-RPC
 is browser-only: the CLI never imports or emulates the harness, and neither does
 it import the Arkiv SDK.
 
+The inspect-only Local Agent is available for Studio onboarding. Start it with
+an explicit project directory, pair with its short-lived code in Studio
+Projects, and inspect the project through the existing safe inspector. It binds
+to loopback, rejects unapproved browser origins, never executes project code,
+and does not yet run experiments or import GitHub repositories. See
+[docs/deploy-01-local-agent.md](docs/deploy-01-local-agent.md).
+
 ## Anon-RPC browser routes
 
 Eligible read-only calls (`eth_chainId`, `eth_blockNumber`, `eth_getBalance`,

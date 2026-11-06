@@ -13,6 +13,12 @@ export const studioShell: StudioShell = {
 };
 
 export {
+  type AgentConnectionState,
+  type AgentState,
+  createStudioAgentClient,
+  type StudioAgentClient,
+} from "./agent.js";
+export {
   ArkivController,
   type ArkivGateway,
   type ArkivRecord,

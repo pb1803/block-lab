@@ -10,6 +10,7 @@
     { "path": "./packages/browser-rpc" },
     { "path": "./packages/arkiv-metadata" },
     { "path": "./apps/cli" },
+    { "path": "./apps/local-agent" },
     { "path": "./apps/studio" },
     { "path": "./apps/sample-dapp" }
   ]

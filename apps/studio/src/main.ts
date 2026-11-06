@@ -15,6 +15,7 @@ import {
   metadataToPayloadBytes,
   validateExperimentMetadata,
 } from "@blocklab/arkiv-metadata";
+import { createStudioAgentClient } from "./agent.js";
 import { ARKIV_ACCESS_KEY, RABDI_CHAIN_ID_HEX } from "./arkiv/config.js";
 import { ArkivController } from "./arkiv/controller.js";
 import { mountArkivCompare, mountStudioArkiv } from "./arkiv/dom.js";
@@ -36,7 +37,10 @@ if (root === null) {
   throw new Error("Studio markup is missing #studio-root.");
 }
 
-const shell = mountStudioShell(root, routeFromHash(window.location.hash));
+const agent = createStudioAgentClient();
+const shell = mountStudioShell(root, routeFromHash(window.location.hash), {
+  agent,
+});
 const walletError = document.createElement("div");
 walletError.className = "wallet-error";
 walletError.setAttribute("role", "alert");

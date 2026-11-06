@@ -288,12 +288,13 @@ meaningfully distinguished.
 | UI-07 | P1 | Add Anon-RPC comparison view | ANON-08; UI-01 | Browser measurements and exclusions are visible | DONE (Phase 13, comparison panel; exported via studio-view-check/export-check) |
 | UI-08 | P0 | Audit Studio and define redesign blueprint | UI-06; UI-07 | Current screens, boundaries, hybrid architecture, and attack catalogue are documented without rewriting the app | DONE (2026-11-06) |
 | UI-09 | P0 | Build design system and application shell | UI-08 | Navigation, tokens, responsive shell, and accessible page states are implemented | DONE (2026-11-06; Arkiv/comparison remain under Evidence Vault, unfinished workflows are explicit unavailable states) |
-| UI-10 | P0 | Build Overview and Projects workflows | UI-09; INS-07 | Project context and evidence-labelled inspection are usable in Studio | TODO |
+| UI-10 | P0 | Build Overview and Projects workflows | UI-09; INS-07 | Project context and evidence-labelled inspection are usable in Studio | DONE (2026-11-06; inspect-only Local Agent integration) |
 | UI-11 | P0 | Build Attack Lab and scenario configuration | UI-09; RUN-10 | Verified scenarios have explicit preflight and safety controls | TODO |
 | UI-12 | P0 | Build experiment execution and live monitoring | UI-11; DEPLOY-01 | Actual runner events drive the timeline through the agent boundary | TODO |
 | UI-13 | P0 | Build results, evidence, replay, and comparison views | UI-12 | Results and limitations are actionable and reproducible | TODO |
 | UI-14 | P1 | Integrate Anon-RPC and Arkiv into Studio shell | UI-13; ANON-09; ARK-08 | Existing verified integrations are reachable without duplicated engines | TODO |
 | UI-15 | P1 | Responsive and accessibility polish | UI-14 | Core workflow works on desktop/tablet with keyboard and assistive technology | TODO |
+| DEPLOY-01 | P0 | Build secure inspect-only Local Agent | UI-09; INS-07 | Explicit project authorization, pairing, revocation, Origin checks, and safe inspection work without execution | DONE (2026-11-06; process execution and GitHub import deferred) |
 | SAFE-01 | P0 | Test redaction and local evidence | RUN-09 | Secrets, cookies, wallet identifiers, and raw payloads are absent | TODO |
 | SAFE-02 | P0 | Test cleanup and cancellation | RUN-02; DEMO-05 | No orphaned process/proxy remains | TODO |
 | SAFE-03 | P0 | Security review trust boundaries | SAFE-01; SAFE-02 | High-impact findings are fixed or explicitly documented | TODO |

@@ -1,28 +1,16 @@
 import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
 import type {
+  InspectionSummary as CoreInspectionSummary,
+  PackageManager as CorePackageManager,
   DependencyEdge,
   DependencyNode,
   DependencyType,
   EvidenceConfidence,
 } from "@blocklab/core";
 
-export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
-
-export interface InspectionSummary {
-  readonly schemaVersion: "1.0";
-  readonly rootPath: string;
-  readonly manifest: "present" | "missing" | "malformed";
-  readonly packageManagers: readonly PackageManager[];
-  readonly packageManagerConflict: boolean;
-  readonly detectedStack: readonly string[];
-  readonly dependencies: readonly DependencyNode[];
-  readonly edges: readonly DependencyEdge[];
-  readonly chainIds: readonly number[];
-  readonly networkNames: readonly string[];
-  readonly rpcReferences: readonly string[];
-  readonly limitations: readonly string[];
-}
+export type PackageManager = CorePackageManager;
+export type InspectionSummary = CoreInspectionSummary;
 
 export class InspectionError extends Error {
   public readonly code:

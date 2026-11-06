@@ -65,6 +65,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/scenarios
 
+  apps/local-agent:
+    dependencies:
+      '@blocklab/inspector':
+        specifier: workspace:*
+        version: link:../../packages/inspector
+
   apps/sample-dapp:
     dependencies:
       '@blocklab/browser-rpc':
