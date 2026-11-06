@@ -470,6 +470,19 @@ the publication claim rests on the read-back above, never on a mock run).
 
 **Exit gate:** A first-time user understands import → inspect → test → recover → report without a dashboard overload.
 
+### UI-08 status (2026-11-06)
+
+The complete Studio audit and redesign blueprint are documented in:
+
+- [docs/ui-08-studio-audit.md](docs/ui-08-studio-audit.md)
+- [docs/ui-08-redesign-spec.md](docs/ui-08-redesign-spec.md)
+- [docs/ui-08-hybrid-architecture.md](docs/ui-08-hybrid-architecture.md)
+- [docs/ui-08-attack-catalogue.md](docs/ui-08-attack-catalogue.md)
+
+The audit confirms that the current Studio is a functional Arkiv history and
+RPC comparison surface, not yet the Phase 17 product shell. No UI rewrite or
+local-agent bridge was started in UI-08.
+
 ## Phase 18 — Hardening and security review
 
 1. Run all flows from a clean checkout.
