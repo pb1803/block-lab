@@ -395,6 +395,23 @@ mined, the entity reads back, every payload field matches, actual gas was
     defects were fixed on the way (case-sensitive address comparison, stale owner
     in the detail panel). Evidence: [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
+    ARK-06 (expiry) was then taken as far as investigation allows without a write.
+    The protocol rules came from SDK source rather than inference: expiry is a pair
+    of `uint64` **block** values resolved as `max(expiresAt, landingBlock +
+    minLifetime)`, capped at 7 884 000 blocks, with no protocol minimum (1 block, ~2 s,
+    is expressible), no way to shorten an expiry afterwards (`ExpiryNotExtended`), no
+    expiry event, and a `null` from `arkiv_getEntity` for a dead key — so an expired
+    entity is indistinguishable from a nonexistent one unless the read is timed
+    against `$expiresAt`. The three existing entities are 6.6–7.0 days from their
+    deadlines and cannot be shortened, so the plan is a single 5-block probe
+    (`ark06-expiry-001`, harness signer, ~0.0002 tGLM, ~3 min) with a poller armed
+    before the create and independent read-backs on both sides of the boundary;
+    waiting out `poc-write-001` (6.6 days, zero gas) is the documented fallback. The
+    same work lists four ARK-08 mismatches (no expired state, an unreachable
+    `expired` reason, no re-read of an open panel, history rows silently vanishing).
+    Design and success criteria: [docs/arkiv-ark06.md](docs/arkiv-ark06.md). ARK-06
+    stays PARTIAL — nothing has expired yet.
+
 Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
 25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
 the publication claim rests on the read-back above, never on a mock run).

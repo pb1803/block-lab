@@ -151,9 +151,11 @@ payload and expiry proven unchanged and the `OwnershipTransferred` event decoded
 evidence in [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 What is **not** claimed: no
-observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded on both
-entities but nothing was watched die). These stay experiments, not claims. See
-[docs/arkiv-ark05.md](docs/arkiv-ark05.md).
+observed entity expiry. ARK-06 is investigation-only — the protocol rules are
+settled from SDK source and a 5-block probe is designed, but nothing was watched
+die, so `expiresAt` stays a recorded block rather than an observed transition
+([docs/arkiv-ark06.md](docs/arkiv-ark06.md)). These stay experiments, not claims.
+See [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 ## Studio Arkiv history
 
