@@ -53,6 +53,12 @@ It is deliberately a *publication probe*:
   latency, no evidence bundle, no scenario result is claimed.
 - A fixed synthetic timestamp (`2026-11-06T00:00:00Z`), so the canonical bytes are
   reproducible by anyone running `record:test`.
+- The payload actually written on chain is the 493-byte pretty-printed JSON above;
+  `metadataToPayloadBytes` produces it and its SHA-256 is
+  `59c090b8ea2a1818d9e2eba1395e8eda67a3e9795dce7aff5e961d0654d726a6`. Note that
+  hashing the *compact* `JSON.stringify(record)` instead yields a different digest
+  (`8c98ed2e…53e0`); the verifier and the driver both use the payload bytes, so
+  quote `59c090b8…` as the payload hash and never the compact one.
 - `evidenceDigest` is the SHA-256 of the documented preimage
   `BLOCKLAB ARK-07 Studio browser-wallet publication test record studio-mm-001`
   (a note, not a measurement). `evidenceRef` points at a local-only note.
