@@ -1,13 +1,15 @@
 # ARK-05 — owner, creator and ownership transfer
 
-**Status: PARTIAL — ready, awaiting authorization.** The mechanism is fully
+**Status: PARTIAL — entity created, transfer pending.** The mechanism is fully
 verified from the installed SDK, fully implemented and unit-tested in Studio, and
-the run below is prepared and gate-checked read-only. **No transfer (and no entity
-for this run) has been broadcast yet**, so on-chain two-wallet behaviour is still
-unobserved. ARK-05 stays PARTIAL until a real two-wallet run is recorded here.
+stage 1 (creation with A) is executed and independently verified, stage 2 (the
+transfer) is not. **No transfer has been broadcast yet**, so the two-wallet
+ownership behaviour itself is still unobserved. ARK-05 stays PARTIAL until
+stage 2 is recorded here.
 
-Nothing in this phase wrote to Rabdi. `poc-write-001` and `studio-mm-001` were
-neither modified, transferred, re-published nor reused as experiment IDs.
+Stage 1 wrote exactly one new entity (`studio-mm-002`). `poc-write-001` and
+`studio-mm-001` were neither modified, transferred, re-published nor reused as
+experiment IDs, and no second transaction was sent after the creation.
 
 ## What the question actually is
 
@@ -130,14 +132,17 @@ Controller behaviour that matters:
 
 No wallet switching, no private-key input, no popup on load, no automatic retry.
 
-## Readiness (checked read-only, nothing signed)
+## Readiness at preparation time (checked read-only, nothing signed)
+
+The row for the id below describes the state *before* stage 1; the Result section
+records the state after it.
 
 | Gate | State |
 |---|---|
 | Destination address valid, EIP-55 canonical, not zero, not A | PASS — `normalizeAddress` returns it unchanged, `transferBlockReason` returns `null` for owner A |
 | Destination is an EOA on Rabdi with gas | PASS — `0xAd79…D3ca`, `9.999441629 tGLM`, code `0x` |
 | Owner A can pay for the transfer | PASS — `0xD431…2EBE9`, `4.999781017 tGLM`, code `0x` |
-| `studio-mm-002` unused | PASS — duplicate preflight finds no entity (head `285542`) |
+| `studio-mm-002` unused | PASS at preparation — duplicate preflight found no entity (head `285542`); now published, see Result |
 | Existing entities intact | PASS — `poc-write-001` → `0x1d7b6bf8…b31a`, `studio-mm-001` → `0x9038f929…bcb7` |
 | Chain / head / explorer reachable | PASS — chain id `7794095`, head readable, explorer HTTP 200 |
 | Preview renders correctly for B | PASS — dry-run shows creator unchanged, owner → B, signer A, expiry unchanged, 4 caveats |
@@ -219,19 +224,57 @@ event, both verification outputs and the exact exit code of every command.
 
 ## Result
 
-Not yet run. To be filled in after an approved live run:
+### Stage 1 — creation with A: DONE (2026-11-07)
+
+Executed under explicit authorization for the creation only. Exactly one
+`createEntity`, one MetaMask approval by A, no second transaction, no retry.
+Verified by the driver (10/10) and then independently from a second process
+(10/10, exit 0).
 
 | Field | Value |
 |---|---|
-| Entity key | _pending_ |
-| Create tx / signer | _pending_ |
-| Transfer tx / signer | _pending_ |
-| Owner before → after | _pending_ |
-| Creator before → after | _pending_ |
-| Payload SHA-256 before → after | _pending_ |
-| Expiry (block) before → after | _pending_ |
-| `OwnershipTransferred` decoded | _pending_ |
-| Negative check (A cannot transfer) | _pending_ |
+| Entity key | `0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb` |
+| Create tx / signer | `0x852d9eb1fa2c959c1805f0b822a88a5b327a3504b3731699f18e762fddf9cdc0` / `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` (MetaMask, A) |
+| Block / receipt | `285811`, status `success` |
+| Gas | `187358` × `1 gwei` = `0.000187358 tGLM` (A: `4.999781017` → `4.999593659`) |
+| Owner before → after | `0xD431…2EBE9` → pending transfer |
+| Creator before → after | `0xD431…2EBE9` → pending transfer |
+| Payload | 496 bytes, SHA-256 `dfe87f08922439924f3df6f8f34d1e4ec1a369da54c9cc707a3f5a7653391f9d`, byte-identical to the canonical record |
+| Expiry (block) before → after | `588211` (= `285811 + 302400`) → pending transfer |
+| `OwnershipTransferred` decoded | none yet — no transfer broadcast |
+| Negative check (A cannot transfer) | pending transfer |
+| Indexed retrieval by `experimentId` | PASS — the duplicate preflight now reports it as published (exit 2) |
+| `poc-write-001` / `studio-mm-001` | untouched, still `0x1d7b…b31a` / `0x9038…bcb7`, owner and creator unchanged |
+
+Independent evidence, second process:
+
+```
+PASS  payload present — 496 bytes, SHA-256 dfe87f08…3391f9d
+PASS  revalidates against the shared contract — experimentId "studio-mm-002"
+PASS  byte-identical to the canonical record — 496 bytes match
+PASS  owner == creator — 0xD431…2EBE9 vs 0xD431…2EBE9
+PASS  owner == signer — 0xD431…2EBE9 vs 0xD431…2EBE9
+PASS  entity key matches the published key
+PASS  expiry after creation — 302400 blocks (285811 → 588211)
+PASS  mined receipt succeeded — status success at block 285811
+VERIFIED: 10/10 checks passed.   (exit 0)
+```
+
+Explorer: `https://rabdi.explorer.arkiv.network/entity/0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb`
+
+Reproduce the read-back (no wallet needed, nothing signed):
+
+```bash
+pnpm --filter @blocklab/studio run verify:entity --   --entity 0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb   --signer 0xD431714db82331B07697Ea4675334C3AF6d2EBE9   --tx 0x852d9eb1fa2c959c1805f0b822a88a5b327a3504b3731699f18e762fddf9cdc0
+```
+
+`--record` adds the byte-identity check; without it that line reports FAIL by
+design ("no canonical record supplied"), which is why it is not shown as evidence.
+
+### Stage 2 — transfer to B: NOT STARTED
+
+Awaiting separate authorization. Destination stays
+`0xAd797f58aFD3265C00504382171eC0818262D3ca` (`9.999441629 tGLM`, EOA).
 
 ## Automation vs chain evidence
 

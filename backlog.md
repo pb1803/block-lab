@@ -139,7 +139,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 | ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | DONE |
 | ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | DONE (2026-11-06; see notes) |
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
-| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL — transfer semantics established from the SDK (`creator` immutable, `owner` mutable, owner must sign, no accept step) and implemented + unit-tested in Studio; no transfer broadcast yet (see note, [docs/arkiv-ark05.md](docs/arkiv-ark05.md)) |
+| ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL — creation stage DONE (`studio-mm-002`, 10/10 independent checks); transfer to B still pending. Transfer semantics established from the SDK (`creator` immutable, `owner` mutable, owner must sign, no accept step) and implemented + unit-tested in Studio; no transfer broadcast yet (see note, [docs/arkiv-ark05.md](docs/arkiv-ark05.md)) |
 | ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | PARTIAL — configuration documented on both entities; nothing observed expiring yet (`studio-mm-001` expires at block `586222`) |
 | ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | DONE (2026-11-06) — real MetaMask signature from Studio, entity `0x9038f929…bcb7`, tx `0xef91a94a…5f2d9`, 11/11 read-back checks; evidence in [docs/arkiv-ark07.md](docs/arkiv-ark07.md) |
 | ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | PARTIAL — implemented and unit-tested; loading/empty/error verified in headless Chrome with the mock wallet, but the success state is only reachable live now that `studio-mm-001` exists (not yet driven through Studio's DOM), and the expired state needs ARK-06 |
@@ -170,8 +170,13 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   and only the owner may sign (evidence table in
   [docs/arkiv-ark05.md](docs/arkiv-ark05.md)). Studio now has a preview → confirm →
   read-back transfer flow with every precondition gated, and it never auto-retries.
-  **Still missing:** an actual broadcast. Nothing is claimed about live behaviour,
-  gas, or the `OwnershipTransferred` event until a two-wallet run is recorded.
+  **Creation stage DONE (2026-11-07):** `studio-mm-002` was published once by A
+  (entity `0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb`, tx
+  `0x852d9eb1…f9cdc0`, block `285811`, 496 bytes SHA-256 `dfe87f08…3391f9d`, gas
+  `0.000187358 tGLM`, owner == creator == signer, expiry `588211`), verified 10/10
+  by the driver and 10/10 independently. **Still missing:** the transfer itself, so
+  nothing is claimed about live transfer behaviour, gas for a transfer, or the
+  `OwnershipTransferred` event.
 - **ARK-06 PARTIAL**: expiry *configuration* is evidenced twice — `expiresAt` `571599` on `poc-write-001` and `586222` on `studio-mm-001`, both exactly `creation + 302400` blocks, matching the `expiryDays: 7` request. Nothing has been *observed* expiring: both entities are still inside their windows, so the post-expiry read behaviour (`NoEntityFoundError` / `missing` state) is only unit-tested, never seen against Rabdi.
 - **ARK-07 DONE (2026-11-06)**: a real MetaMask approval published the dedicated
   test record `studio-mm-001` from Studio on Rabdi and the entity was read back
