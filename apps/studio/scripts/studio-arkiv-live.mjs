@@ -48,7 +48,7 @@ import {
 } from "@blocklab/arkiv-metadata";
 import { experimentSchema } from "../src/arkiv/schema.ts";
 import { buildPublicationEvidence } from "../src/arkiv/verify-publication.ts";
-import { buildRecord, EXPERIMENT_ID } from "./studio-mm-001-record.mjs";
+import { buildRecord, EXPERIMENT_ID } from "./studio-mm-test-record.mjs";
 
 const RABDI_CHAIN_ID = 7_794_095;
 const EXPLORER = "https://rabdi.explorer.arkiv.network";
@@ -397,7 +397,7 @@ async function main() {
   //    clicking Publish (or --arm-publish) and confirming in MetaMask.
   console.log("\n--- approval card ---------------------------------------------------");
   console.log(`  experiment id : ${EXPERIMENT_ID}`);
-  console.log("  scenario      : Studio wallet-signed publication test");
+  console.log(`  scenario      : ${record.scenarioName ?? "(missing)"}`);
   console.log(`  signer        : ${signer} (MetaMask)`);
   console.log(`  network       : Rabdi ${chainHex}`);
   console.log(`  lifetime      : ${record.expiryDays} days`);

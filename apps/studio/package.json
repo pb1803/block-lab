@@ -12,7 +12,8 @@
     "dev": "vite",
     "preflight:test": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-preflight.mjs",
     "preview": "vite preview",
-    "record:test": "node scripts/studio-mm-001-record.mjs",
+    "record:ark05": "node scripts/studio-mm-002-record.mjs",
+    "record:test": "node scripts/studio-mm-test-record.mjs",
     "verify:entity": "node --env-file=../arkiv-poc/.env.local scripts/verify-entity.mjs",
     "verify:live": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-live.mjs"
   },

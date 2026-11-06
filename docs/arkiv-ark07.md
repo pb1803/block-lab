@@ -67,7 +67,7 @@ Regenerate it (deterministic):
 
 ```bash
 pnpm --filter @blocklab/studio run record:test           # pretty JSON for the UI
-pnpm --filter @blocklab/studio exec node scripts/studio-mm-001-record.mjs --json
+pnpm --filter @blocklab/studio run record:test -- --json
 ```
 
 ## Preconditions

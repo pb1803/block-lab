@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Read-only pre-publication gate for the ARK-07 test record (`studio-mm-001`).
+ * Read-only pre-publication gate for a test record (`studio-mm-001` ARK-07 by
+ * default; set STUDIO_EXPERIMENT_ID for another id, e.g. `studio-mm-002`).
  *
  * It never signs and never writes. It answers: can a browser-wallet publication
  * proceed right now without creating a duplicate or failing on the network?
@@ -24,7 +25,7 @@ import { rabdi } from "@arkiv-network/sdk/chains";
 import { eq } from "@arkiv-network/sdk/query";
 import { http } from "viem";
 import { experimentSchema } from "../src/arkiv/schema.ts";
-import { EXPERIMENT_ID } from "./studio-mm-001-record.mjs";
+import { EXPERIMENT_ID } from "./studio-mm-test-record.mjs";
 
 const RABDI_CHAIN_ID = 7_794_095;
 const EXPLORER = "https://rabdi.explorer.arkiv.network";

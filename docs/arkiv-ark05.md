@@ -1,9 +1,10 @@
 # ARK-05 — owner, creator and ownership transfer
 
-**Status: PARTIAL.** The mechanism is fully verified from the installed SDK and
-fully implemented and unit-tested in Studio, but **no transfer has been broadcast
-yet**: on-chain two-wallet behaviour is still unobserved. ARK-05 stays PARTIAL
-until a real two-wallet run is recorded here.
+**Status: PARTIAL — ready, awaiting authorization.** The mechanism is fully
+verified from the installed SDK, fully implemented and unit-tested in Studio, and
+the run below is prepared and gate-checked read-only. **No transfer (and no entity
+for this run) has been broadcast yet**, so on-chain two-wallet behaviour is still
+unobserved. ARK-05 stays PARTIAL until a real two-wallet run is recorded here.
 
 Nothing in this phase wrote to Rabdi. `poc-write-001` and `studio-mm-001` were
 neither modified, transferred, re-published nor reused as experiment IDs.
@@ -56,34 +57,38 @@ Everything below is quoted from `apps/studio/node_modules/@arkiv-network/sdk`.
 
 Two wallets, one fresh entity, no reuse:
 
-| Role | Wallet | Signer of |
-|---|---|---|
-| A | MetaMask vault account 1 (`0xD431…2EBE9`) | create, and the transfer |
-| B | MetaMask vault account 2 (funded separately) | nothing — B never signs |
+| Role | Wallet | Rabdi address | Signs | Pays gas |
+|---|---|---|---|---|
+| A — creator and current owner | MetaMask account on laptop A | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` | create + transfer | yes, both |
+| B — intended new owner | MetaMask account (laptop B) | `0xAd797f58aFD3265C00504382171eC0818262D3ca` | **nothing** | **no** |
 
-Wait for B: the transfer must be **initiated by A**, because only the owner can.
+B is a **receiver only**. The SDK proves why: the transfer op is
+`(bytes32 entityKey, address newOwner)` and only the *current* owner signs
+(`NotOwner` otherwise), and no accept/claim action exists. So B needs no
+signature, no gas and no session at transfer time — and B must not be asked to
+approve anything. B is needed to (a) supply the destination address and (b)
+verify the result independently from a second machine.
 
-Stages, each with its own read-back before the next is allowed:
+Stage plan, each stage read back before the next is allowed:
 
-1. **Create with A** — fresh `experimentId` `studio-mm-002`, marked as a test, using
-   the existing publication workflow. Idempotency preflight still applies.
-2. **Read back** — independent retrieval of the new entity: owner, creator,
-   expiry, payload hash, and the tx signer must all be recorded. Expect
-   `owner == creator == A`.
-3. **Record the "before" state** — the SHA-256 of the payload, the expiry block and
-   both addresses, before anything is staged.
-4. **Preview with A** — Studio reads the entity live, shows creator (unchanged),
-   owner now, owner after, signer, role, expiry (unchanged) and payload size.
-   Nothing is signed at this point.
-5. **Confirm with A** — exactly one `changeOwnership`, one wallet approval. No
-   automatic retry.
-6. **Read back, twice, independently** — once in Studio immediately after the
-   receipt, once from a separate process (`verify:entity`-style retrieval). Expect
-   `owner == B`, `creator == A` still, expiry and payload hash unchanged, entity
-   still retrievable, and the transfer tx signed by A.
-7. **Negative check with A** — from A (no longer owner) stage a second transfer.
-   The UI must block with "you created this, you are no longer the owner"; A's
-   wallet must not be asked to sign.
+1. **Create with A** — fresh `experimentId` `studio-mm-002`, marked as a test,
+   through the existing publication workflow. The duplicate preflight still applies.
+2. **Read back** — independent retrieval of the new entity: owner, creator, expiry,
+   payload hash and the tx signer. Expect `owner == creator == A`.
+3. **Record the "before" state** — payload SHA-256, expiry block, both addresses.
+4. **Preview with A** — Studio reads the entity live and shows creator (unchanged),
+   owner now, owner after (B), signer, role, expiry (unchanged) and retained payload
+   size. Nothing is signed here.
+5. **Confirm with A** — exactly one `changeOwnership`, one wallet approval. No retry.
+6. **Read back, twice, independently** — once in Studio right after the receipt, once
+   from a separate process on laptop B. Expect `owner == B`, `creator == A` still,
+   expiry and payload hash unchanged, entity still retrievable, transfer tx signed
+   by A.
+7. **Negative check with A** — A is no longer the owner, so a second preview must be
+   blocked before any prompt.
+8. **Optional ownership check with B** — from B, a further preview is *allowed*
+   (B is now the owner) which confirms the role logic from the other side. Still
+   draft-only until someone approves it.
 
 ## What the code does now
 
@@ -125,41 +130,92 @@ Controller behaviour that matters:
 
 No wallet switching, no private-key input, no popup on load, no automatic retry.
 
+## Readiness (checked read-only, nothing signed)
+
+| Gate | State |
+|---|---|
+| Destination address valid, EIP-55 canonical, not zero, not A | PASS — `normalizeAddress` returns it unchanged, `transferBlockReason` returns `null` for owner A |
+| Destination is an EOA on Rabdi with gas | PASS — `0xAd79…D3ca`, `9.999441629 tGLM`, code `0x` |
+| Owner A can pay for the transfer | PASS — `0xD431…2EBE9`, `4.999781017 tGLM`, code `0x` |
+| `studio-mm-002` unused | PASS — duplicate preflight finds no entity (head `285542`) |
+| Existing entities intact | PASS — `poc-write-001` → `0x1d7b6bf8…b31a`, `studio-mm-001` → `0x9038f929…bcb7` |
+| Chain / head / explorer reachable | PASS — chain id `7794095`, head readable, explorer HTTP 200 |
+| Preview renders correctly for B | PASS — dry-run shows creator unchanged, owner → B, signer A, expiry unchanged, 4 caveats |
+
+Two gaps that were open before this preparation, both closed without a broadcast:
+the record id was hardcoded to `studio-mm-001` (so a create for `studio-mm-002`
+would have been refused by the duplicate preflight), and the runbook claimed B
+must be funded and needed its own MetaMask session. Both are fixed: the record
+module now carries one frozen profile per id (`record:ark05` prints `studio-mm-002`,
+`record:test` still reproduces `studio-mm-001` byte for byte), and the design now
+states that B signs nothing and pays no gas.
+
 ## Live-verification procedure (needs explicit approval)
 
-Prerequisites, once approved:
+Record for this run — deterministic, already generated, **nothing broadcast**:
 
-1. Second MetaMask vault account, funded with tGLM from the same faucet used for
-   `0xD431…2EBE9`; note its public address only.
-2. Studio running and connected as A on Rabdi, both accounts present in the same
-   vault.
+| Field | Value |
+|---|---|
+| `experimentId` | `studio-mm-002` |
+| record | `pnpm --filter @blocklab/studio run record:ark05` |
+| compact JSON SHA-256 | `1985617a653b1f63cc0fa309ee18d4721afb6c37264574e31b5a358049542d8d` |
+| on-chain payload | 496 bytes, SHA-256 `dfe87f08922439924f3df6f8f34d1e4ec1a369da54c9cc707a3f5a7653391f9d` |
+| digest preimage | `BLOCKLAB ARK-05 two-wallet ownership transfer test record studio-mm-002` |
+| `evidenceDigest` | `10e1a6d2cfcee85bdeb7e9c27acc99178cc023582b174aeba1520a7deeefaa72` |
+| destination | `0xAd797f58aFD3265C00504382171eC0818262D3ca` |
 
-Steps:
+Readiness facts gathered read-only at head `285542`: A holds `4.999781017 tGLM`
+and is an EOA, B holds `9.999441629 tGLM` and is an EOA (so no faucet run is
+needed), `studio-mm-002` has no entity yet, and `poc-write-001` /
+`studio-mm-001` still resolve to `0x1d7b6bf8…b31a` / `0x9038f929…bcb7`.
+
+All commands run from the repository root. Prefixing `STUDIO_EXPERIMENT_ID=studio-mm-002`
+only works in a POSIX shell (Git Bash, macOS, Linux); on Windows `cmd` use
+`pnpm --filter @blocklab/studio run record:ark05` and the equivalent env var via
+`set`.
+
+**Laptop A (holds A's MetaMask and the Studio tab):**
 
 ```bash
-# 1. create (fresh id studio-mm-002) — approval #1
-pnpm --filter @blocklab/studio verify:live -- --arm-publish
+# 0. read-only gates — duplicate, chain, head, explorer (never signs)
+STUDIO_EXPERIMENT_ID=studio-mm-002 pnpm --filter @blocklab/studio run preflight:test
 
-# 2. read back the new entity from a separate process
-pnpm --filter @blocklab/studio verify:entity -- --key <new-entity-key>
+# 1. print the record to paste into Studio's textarea
+pnpm --filter @blocklab/studio run record:ark05
 
-# 3. confirm owner == creator == A, then stage the transfer in Studio:
-#    open the entity by key, paste B's address, Preview transfer
-#    (expect: creator unchanged, owner -> B, signer A, expiry unchanged)
+# 2. paste it, press Publish, approve in MetaMask  — approval #1
+#    (or drive it headless; the driver reads STUDIO_EXPERIMENT_ID too)
+STUDIO_EXPERIMENT_ID=studio-mm-002 pnpm --filter @blocklab/studio run verify:live -- --arm-publish
 
-# 4. approval #2 — Confirm transfer; one MetaMask prompt, no retry
+# 3. read back the new key from a separate process, then record owner/creator/
+#    expiry/payload hash and the tx signer
+pnpm --filter @blocklab/studio run verify:entity -- --experiment-id studio-mm-002
 
-# 5. independent read-back, twice
-pnpm --filter @blocklab/studio verify:entity -- --key <new-entity-key>
-# expect owner = B, creator = A, same payload hash, same expiry, tx signed by A
+# 4. open the entity by key in Studio, paste B's address, "Preview transfer"
+#    (expect: creator unchanged, owner -> B, signer A, expiry unchanged, 4 caveats)
 
-# 6. negative check: back in Studio as A, Preview transfer again
-#    expect a block, no prompt
+# 5. press "Confirm transfer", approve in MetaMask  — approval #2, exactly once
+
+# 6. read back twice and record the comparison
+pnpm --filter @blocklab/studio run verify:entity -- --experiment-id studio-mm-002
+
+# 7. negative check: Preview transfer again as A -> blocked, no prompt
 ```
+
+**Laptop B (no wallet needed for verification):**
+
+```bash
+# needs only an Arkiv access key (or the committed .env.local) and the entity key
+pnpm --filter @blocklab/studio run verify:entity -- --entity <new-entity-key>
+```
+
+Laptop B's output must show owner B, creator A, the same payload hash and the same
+expiry, and be pasted into the Result table unchanged. Its value is that it shares
+nothing with the machine that signed.
 
 Record in the Result section below: entity key, create tx, transfer tx, signers,
 payload hash before/after, expiry before/after, decoded `OwnershipTransferred`
-event, and the exact exit code of each command.
+event, both verification outputs and the exact exit code of every command.
 
 ## Result
 
