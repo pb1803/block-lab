@@ -1,10 +1,9 @@
 # ARK-07 — real browser-wallet publication runbook
 
-**Status: PARTIAL — tooling and every non-signing gate verified live; the wallet
-signature has not been performed yet.** This document describes exactly what a
-verified run looks like, so the claim can only be made once the evidence block at
-the end is produced by a real MetaMask approval. Nothing here asserts a second
-published entity.
+**Status: DONE (2026-11-06).** A real MetaMask approval produced a real Rabdi
+entity, which was read back and byte-compared from a separate process: 11/11
+checks. See [Result](#result--verified-publication-2026-11-06). Nothing here
+asserts an entity other than the one recorded below.
 
 ## Why this exists
 
@@ -183,6 +182,26 @@ second publication and does not change ARK-07's status.
 Exit codes: `0` verified, `1` failure, `2` blocked before signing, `4` no
 debuggable Chrome page.
 
+### Process lifecycle and exit codes
+
+The driver used to end the process with `process.exit()`. That is unreliable here:
+forcing an exit while the CDP socket and the viem/undici keep-alive sockets still
+hold handles makes Node abort on Windows with
+`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c` and
+replaces the exit code with `3221226505`. Reproduced 3/3 with six lines (one SDK
+`http()` call, then `process.exit()`), and it reproduced through
+`--check-only` even on the already-published id.
+
+The success path had the opposite bug: it set `process.exitCode` and returned
+without closing the CDP socket, so after printing `VERIFIED` the process never
+exited (still running after 120 s).
+
+Both are fixed by one exit path: blockers throw a `Stop` carrying the exit code,
+the socket is closed in a `finally`, and `process.exitCode` is set so Node drains
+its own sockets. Verified: `--check-only` on the duplicate id now exits `2` with
+zero assertions in ~5 s, and the `VERIFIED` tail exits `0` in well under a second.
+No exit code and no safety behaviour changed — only how the process terminates.
+
 ## What a verified run must record
 
 Only facts from the mined receipt and the independent read-back may be written
@@ -198,6 +217,57 @@ Then, and only then, ARK-07 can be marked DONE and backlog/plan updated with tha
 evidence. A mock run, a wallet rejection, or a submission without a receipt is
 **not** a publication and must not be recorded as one.
 
+## Result — verified publication (2026-11-06)
+
+A real publication happened through Studio with a real MetaMask approval, exactly
+one entity, no pasted private key, no retry. Authoritative evidence:
+
+| Field | Value |
+|---|---|---|
+| Experiment id | `studio-mm-001` |
+| Transaction | `0xef91a94aa8eb3df5881d42d801fe3217a764378d9253867b1b981e9dddc5f2d9` |
+| Entity key | `0x9038f929ac92b25eb383fa6648290d631c18e5c9976a51fffc9f964adeecbcb7` |
+| Network / chain | Rabdi, `7794095` |
+| Block | `283822` |
+| Signer (MetaMask) | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` |
+| Payload | 493 bytes, SHA-256 `59c090b8ea2a1818d9e2eba1395e8eda67a3e9795dce7aff5e961d0654d726a6` |
+| Gas | `197983` used → `0.000197983 tGLM` |
+| Expiry | 7 days (`302400` blocks) |
+| Receipt | success |
+| Read-back | independent, successful |
+| Canonical payload | byte-identical |
+| Shared schema | revalidation true |
+| Indexed retrieval | found by `experimentId` |
+| Checks | **11/11 passed** |
+| Ownership | `owner == creator == signer` |
+
+Explorer:
+<https://rabdi.explorer.arkiv.network/entity/0x9038f929ac92b25eb383fa6648290d631c18e5c9976a51fffc9f964adeecbcb7>
+
+Re-verified independently on 2026-11-06 with `verify:entity`: 10/10 checks, exit 0,
+and every figure above reproduced exactly (493 bytes, same SHA-256, gas `197983`,
+block `283822`, expiry `283822 → 586222`, `owner == creator == signer`). The
+remaining check in the run's own count of 11 is indexed retrieval by
+`experimentId`, which the duplicate preflight exercises independently: re-running
+now reports `already published: 0x9038f929…bcb7` from an indexed query and refuses
+to create a second entity.
+
+### How this differs from the POC publication
+
+| | `poc-write-001` (ARK-03) | `studio-mm-001` (ARK-07) |
+|---|---|---|
+| Who signed | the POC harness, using a private key from `apps/arkiv-poc/.env.local` | Studio's UI, a human approving in MetaMask |
+| Entity | `0x1d7b6bf8…b31a` | `0x9038f929…bcb7` |
+| Tx | `0xed989cbe…573f05` (block `269199`) | `0xef91a94a…5f2d9` (block `283822`) |
+| Payload | 603 bytes, SHA-256 `410e3d5c…38f4d` | 493 bytes, SHA-256 `59c090b8…726a6` |
+| Signer | `0x8C58af…8759` (harness key) | `0xD431…2EBE9` (MetaMask account) |
+| Gas cost | `0.000209105 tGLM` | `0.000197983 tGLM` |
+| Meaning | proves the Arkiv SDK write path from Node | proves the Studio browser-wallet write path, user-signed |
+
+Neither exposure includes secrets: the signer is a public Rabdi address, the
+access key never leaves `apps/arkiv-poc/.env.local` / `apps/studio/.env.local`,
+and no private key is stored or logged anywhere.
+
 ## What is deliberately not claimed
 
 - Nothing about anonymity or privacy: Arkiv is a public data store, the signer
@@ -205,4 +275,5 @@ evidence. A mock run, a wallet rejection, or a submission without a receipt is
   anonymizing.
 - Nothing about ARK-05 (two-wallet ownership transfer) or ARK-06 (observed
   expiry); both stay PARTIAL.
-- No publication claim for `studio-mm-001` until the evidence block exists.
+- No second publication: `studio-mm-001` exists exactly once; the duplicate
+  preflight and the verifier both enforce that.

@@ -140,11 +140,14 @@ What is verified:
   payload byte-identical to the canonical record. Full evidence:
   [docs/arkiv-poc.md](docs/arkiv-poc.md).
 
-What is **not** claimed: no two-wallet ownership experiment (ARK-05 PARTIAL), no
-observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded but
-nothing was watched die), and no browser-wallet end-to-end write (ARK-07 PARTIAL —
-the real write was driven by the harness signer). These stay experiments, not
-claims.
+The browser-wallet write (ARK-07) is now also real, and separate from this POC: a
+human MetaMask approval published `studio-mm-001` from Studio, verified 11/11 with
+a byte-identical payload and `owner == creator == signer`. Full evidence:
+[docs/arkiv-ark07.md](docs/arkiv-ark07.md).
+
+What is **not** claimed: no two-wallet ownership experiment (ARK-05 PARTIAL), and
+no observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded on
+both entities but nothing was watched die). These stay experiments, not claims.
 
 ## Studio Arkiv history
 
@@ -182,8 +185,9 @@ A real MetaMask publication is a separate, human-approved run, documented in
 [docs/arkiv-ark07.md](docs/arkiv-ark07.md): a deterministic `studio-mm-001` probe
 record, a read-only `preflight:test` gate, and a CDP driver that refuses any
 non-MetaMask provider, checks gas and duplicates before signing, and re-reads the
-entity in a separate process for a byte comparison. ARK-07 stays PARTIAL until
-that signature actually happens — no publication is claimed from tooling alone.
+entity in a separate process for a byte comparison. The signature happened on
+2026-11-06: 11/11 checks passed, so ARK-07 is DONE — the tooling alone never made
+the claim.
 
 ## Package manager
 

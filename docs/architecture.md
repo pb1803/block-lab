@@ -107,6 +107,13 @@ receipt, and re-reads the entity from a separate process for a byte comparison.
 The mocked browser check (`scripts/studio-arkiv-check.mjs`) is never evidence of a
 publication.
 
+That run happened on 2026-11-06 and is recorded in [arkiv-ark07.md](arkiv-ark07.md):
+entity `0x9038f929…bcb7`, eleven checks, byte-identical payload. It is attributed
+to the MetaMask account (`0xD431…2EBE9`), not the POC harness signer, so the two
+publications prove different paths and are never conflated. The driver exits
+through one path that closes its CDP socket and sets `process.exitCode`, because
+forcing `process.exit()` over live socket handles aborts Node on Windows.
+
 `apps/studio/src/arkiv` promotes the POC into a Studio product feature once a real
 write/query/retrieve run existed (`poc-write-001`, verified in
 [arkiv-poc.md](arkiv-poc.md)). Boundaries:

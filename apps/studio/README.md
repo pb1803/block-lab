@@ -192,8 +192,9 @@ panel adds exactly one write path (Publish), and only from an explicit click.
 - Real-browser wiring checks: `scripts/studio-arkiv-check.mjs` drives the built
   app in headless Chrome with a labelled mock wallet (`isBlocklabMockWallet`,
   always 4001 on `eth_sendTransaction`) and asserts the gating throughout — it
-  never claims a publication. Real publication remains the POC harness's
-  verified result (`poc-write-001`).
+  never claims a publication. Real publications are receipt-backed only:
+  `poc-write-001` (POC harness signer) and `studio-mm-001` (MetaMask-signed here,
+  11/11 read-back checks).
 - Wallet-publication checks for ARK-07 (details in
   [docs/arkiv-ark07.md](../../docs/arkiv-ark07.md)):
   - `pnpm --filter @blocklab/studio run record:test` prints the deterministic
@@ -216,6 +217,11 @@ panel adds exactly one write path (Publish), and only from an explicit click.
     waits for your Publish click; `--check-only` stops after the approval card and
     signs nothing. No private key is ever read, and a failed write is re-checked
     once instead of retried.
+  - Result (2026-11-06): a real MetaMask approval published `studio-mm-001` —
+    entity `0x9038f929…bcb7`, tx `0xef91a94a…5f2d9`, 11/11 read-back checks. The
+    driver now also exits through one path (socket closed in `finally`,
+    `process.exitCode` set) because forcing `process.exit()` over live socket
+    handles aborts Node on Windows and loses the documented exit code.
 - Configuration: `VITE_ARKIV_ACCESS_KEY` enables the read/write gateway. Without
   it the panel is display-only and every gateway-dependent action reports
   "Gateway is not ready." — no silent fallback.

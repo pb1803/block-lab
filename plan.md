@@ -355,28 +355,37 @@ mined, the entity reads back, every payload field matches, actual gas was
     (two-wallet ownership) and ARK-06 (observed expiry) remain PARTIAL and are
     not claimed.
 
-11. **PARTIAL** — ARK-07 real-wallet publication. The path is built, gated and
-    documented in [docs/arkiv-ark07.md](docs/arkiv-ark07.md): a dedicated
-    `studio-mm-001` probe record (`idle`, zero counts, fixed timestamp, digest of
-    a documented note), a read-only live preflight (`preflight:test`), and a CDP
-    driver (`apps/studio/scripts/studio-arkiv-live.mjs`) that refuses any provider
-    whose `isMetaMask` is not true, checks gas before signing, re-runs the
-    duplicate preflight, requires the pasted record to equal the canonical bytes,
-    waits for the mined receipt and re-reads the entity from a separate process.
-    Verified live: 11/11 DOM/state contract checks against the built Studio,
-    both refusal paths (no provider, non-MetaMask provider → exit 2), and preflight
-    5/5 against Rabdi. The MetaMask signature is a human click and has not been
-    performed, so ARK-07 stays PARTIAL and no second publication is claimed.
-    `--check-only` rehearses every gate without signing, and the verification step
-    is a shared module (`src/arkiv/verify-publication.ts`, 12 tests) with a
-    standalone `verify:entity` CLI — validated live as a control against the
-    existing `poc-write-001` entity (10/10 checks, byte-identical, gas reproduced)
-    and against `studio-mm-001` (exit 3, nothing published).
+11. **DONE** — ARK-07 real-wallet publication. A real MetaMask approval published
+    `studio-mm-001` from Studio on Rabdi and the result was independently read back
+    and byte-compared: 11/11 checks, entity
+    `0x9038f929ac92b25eb383fa6648290d631c18e5c9976a51fffc9f964adeecbcb7`, tx
+    `0xef91a94a…5f2d9`, block `283822`, gas `0.000197983 tGLM`, byte-identical
+    payload (493 bytes, SHA-256 `59c090b8…726a6`), `owner == creator == signer`,
+    indexed retrieval by `experimentId`. No private key was pasted: the signature
+    is the wallet's. Evidence and the `poc-write-001` distinction are in
+    [docs/arkiv-ark07.md](docs/arkiv-ark07.md).
 
-Verification for this phase: 313 tests / 33 files, lint/typecheck/build clean, and
-a real headless-Chrome run (`scripts/studio-arkiv-check.mjs`, 20/20 checks) with a
-labelled mock wallet. That browser run verifies wiring and gating only; the real
-publication claim still rests solely on the verified `poc-write-001` receipt.
+    The path itself was built earlier: a dedicated `studio-mm-001` probe record
+    (`idle`, zero counts, fixed timestamp, digest of a documented note), a read-only
+    live preflight (`preflight:test`), and a CDP driver
+    (`apps/studio/scripts/studio-arkiv-live.mjs`) that refuses any provider whose
+    `isMetaMask` is not true, checks gas before signing, re-runs the duplicate
+    preflight, requires the pasted record to equal the canonical bytes, waits for
+    the mined receipt and re-reads the entity from a separate process. `--check-only`
+    rehearses every gate without signing, and verification is a shared module
+    (`src/arkiv/verify-publication.ts`, 12 tests) with a standalone `verify:entity`
+    CLI — validated live as a control against the existing `poc-write-001` entity
+    (10/10 checks, byte-identical, gas reproduced). ARK-07 depends on ARK-06, which
+    stays PARTIAL because no entity has been observed to actually expire.
+
+    Two defects found and fixed on the way: provider refusals were classified as
+    network failures (`8df5ee3`), and the driver crashed at exit
+    `3221226505` while the success path never exited at all (`Stop` + `finally`
+    lifecycle, this phase).
+
+Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
+25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
+the publication claim rests on the read-back above, never on a mock run).
 
 ## Phase 16 — ENSv2 conditional gate
 
