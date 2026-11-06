@@ -75,13 +75,27 @@ function parseArgs(argv) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The attached CDP socket, so it can be closed on every exit path. */
+let liveCdp = null;
+
+/**
+ * How the run ends. Thrown rather than calling `process.exit()`: forcing an exit
+ * while the CDP socket and the viem/undici agent still hold handles makes Node
+ * abort on Windows (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`) and
+ * replaces the documented exit code with 3221226505.
+ */
+class Stop extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
 function blocked(message) {
-  console.error(`BLOCKED: ${message}`);
-  process.exit(2);
+  throw new Stop(2, `BLOCKED: ${message}`);
 }
 function failed(message) {
-  console.error(`FAILED: ${message}`);
-  process.exit(1);
+  throw new Stop(1, `FAILED: ${message}`);
 }
 
 class Cdp {
@@ -110,11 +124,11 @@ class Cdp {
       await wait(200);
     }
     if (page === undefined) {
-      console.error(
-        `No debuggable page on port ${port}. Start Chrome with --remote-debugging-port=${port} ` +
+      throw new Stop(
+        4,
+        `no debuggable page on port ${port}. Start Chrome with --remote-debugging-port=${port} ` +
           "and keep at least one tab open.",
       );
-      process.exit(4);
     }
     const socket = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
@@ -236,7 +250,8 @@ async function main() {
   const canonicalJson = new TextDecoder().decode(canonicalBytes);
   const payloadSha256 = createHash("sha256").update(canonicalBytes).digest("hex");
 
-  const cdp = await Cdp.attach(args.port, args.url);
+  liveCdp = await Cdp.attach(args.port, args.url);
+  const cdp = liveCdp;
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Page.navigate", { url: args.url });
@@ -396,7 +411,6 @@ async function main() {
       "CHECK ONLY: every gate passed and the record is ready, but nothing was signed and " +
         "no entity was written. Re-run without --check-only to publish.",
     );
-    cdp.close();
     process.exitCode = 0;
     return;
   }
@@ -439,13 +453,15 @@ async function main() {
     const afterKey = after?.entities[0]?.$key ?? null;
     console.error(String(error.message));
     if (afterKey !== null) {
-      console.error(
-        `The write may still have landed: entity ${afterKey} exists. Not re-signing.`,
+      failed(
+        `the publish result never arrived. The write may still have landed: entity ${afterKey} ` +
+          "exists. Not re-signing; verify it first.",
       );
-    } else {
-      console.error("No entity exists for this id; nothing was written. Not retrying.");
     }
-    process.exit(1);
+    failed(
+      "the publish result never arrived and no entity exists for this id; nothing was written. " +
+        "Not retrying.",
+    );
   }
 
   const publish = stateOf(confirmed).publish;
@@ -459,16 +475,14 @@ async function main() {
       .fetch()
       .catch(() => undefined);
     const afterKey = after?.entities[0]?.$key ?? null;
-    console.error(`publish failed: ${JSON.stringify(publish.error ?? null)}`);
+    const detail = `publish failed: ${JSON.stringify(publish.error ?? null)}`;
     if (afterKey !== null) {
-      console.error(
-        `An entity now exists at ${afterKey} despite the error; nothing was re-signed. ` +
-          "Verify it before trying again.",
+      failed(
+        `${detail}. An entity now exists at ${afterKey} despite the error; nothing was ` +
+          "re-signed. Verify it before trying again.",
       );
-    } else {
-      console.error("No entity exists; nothing was written. Not retrying.");
     }
-    process.exit(1);
+    failed(`${detail}. No entity exists; nothing was written. Not retrying.`);
   }
 
   const entityKey = String(publish.entityKey);
@@ -528,14 +542,31 @@ async function main() {
 
   if (evidence.verified) {
     console.log("\nVERIFIED: one MetaMask-signed Arkiv publication, read back and byte-compared.");
-    process.exitCode = 0;
-  } else {
-    console.error("\nNOT VERIFIED: the read-back did not fully match. Nothing is claimed.");
-    process.exitCode = 1;
+    return;
+  }
+  console.error("\nNOT VERIFIED: the read-back did not fully match. Nothing is claimed.");
+  process.exitCode = 1;
+}
+
+/**
+ * Single exit path. The socket is closed here, and `process.exitCode` is set
+ * rather than forcing an exit, so Node drains the viem/undici keep-alive sockets
+ * itself and still reports the documented exit code.
+ */
+async function run() {
+  try {
+    await main();
+  } catch (error) {
+    const stop = error instanceof Stop ? error : null;
+    console.error(
+      stop === null
+        ? `FAILED: ${error instanceof Error ? error.message : String(error)}`
+        : stop.message,
+    );
+    process.exitCode = stop?.code ?? 1;
+  } finally {
+    liveCdp?.close();
   }
 }
 
-main().catch((error) => {
-  console.error(`FAILED: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+await run();
