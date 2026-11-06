@@ -184,6 +184,13 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   owner==creator==signer, expiry +302400 blocks, receipt success at block 269199,
   gas 0.000209105 tGLM). That control re-verifies ARK-03, not a second write.
 - **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
+- **Phase 15 regression fix (2026-11-06)**: the Connect control was rendered but
+  hidden for every status except `missing`, so a detected-but-unauthorized wallet
+  (the normal state on load) showed no way to connect, and Disconnect was hidden
+  permanently. Visibility now comes from `walletView` and the DOM only obeys it;
+  covered by 8 view + 6 DOM tests and 5 new browser checks (connect visible,
+  Detect hidden, `eth_requestAccounts` really requested, rejection stays
+  disconnected, rejection labelled user-rejected). 25/25 browser checks pass.
 - **Phase 15 Studio integration (2026-11-06)**: `apps/studio/src/arkiv/` adds
   wallet connect/chain detection, gated publish with duplicate preflight and
   byte-level read-back, history search over the indexed attributes, record

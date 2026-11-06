@@ -29,6 +29,17 @@ export type WalletView = {
   readonly statusText: string;
   readonly addressLine: string;
   readonly chainLine: string;
+  /**
+   * Visibility of the wallet actions, decided here so the DOM cannot drift from
+   * the state again (the Connect button used to be hidden as soon as any
+   * provider was detected, which left a disconnected wallet with no action).
+   *   missing      → Detect only (nothing to connect to yet)
+   *   disconnected → Connect
+   *   wrong-network → Switch (explicit) + Disconnect
+   *   connected    → Disconnect
+   */
+  readonly showConnect: boolean;
+  readonly showDetect: boolean;
   readonly showSwitch: boolean;
   readonly canDisconnect: boolean;
 };
@@ -97,6 +108,8 @@ export function walletView(state: StudioArkivState): WalletView {
     statusText: "Wallet not found.",
     addressLine: "",
     chainLine: "No chain reported yet.",
+    showConnect: false,
+    showDetect: false,
     showSwitch: false,
     canDisconnect: false,
   };
@@ -104,10 +117,15 @@ export function walletView(state: StudioArkivState): WalletView {
     return {
       ...base,
       statusText: "No EIP-1193 wallet (window.ethereum) detected.",
+      showDetect: true,
     };
   }
   if (wallet.status === "disconnected") {
-    return { ...base, statusText: "Wallet not connected." };
+    return {
+      ...base,
+      statusText: "Wallet not connected.",
+      showConnect: true,
+    };
   }
   const address = wallet.address ?? "unknown";
   if (wallet.status === "wrong-network") {

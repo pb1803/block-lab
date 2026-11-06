@@ -46,6 +46,58 @@ describe("walletView", () => {
     expect(connected.statusText).toContain("Studio never sees a key");
     expect(connected.chainLine).toContain(RABDI);
   });
+
+  it("offers exactly the wallet actions the state allows", () => {
+    const missing = walletView({
+      ...initialState(),
+      wallet: { status: "missing", address: undefined, chainIdHex: undefined },
+    });
+    expect([
+      missing.showConnect,
+      missing.showDetect,
+      missing.showSwitch,
+    ]).toEqual([false, true, false]);
+
+    // The regression: a disconnected wallet must offer Connect.
+    const disconnected = walletView({
+      ...initialState(),
+      wallet: {
+        status: "disconnected",
+        address: undefined,
+        chainIdHex: undefined,
+      },
+    });
+    expect([
+      disconnected.showConnect,
+      disconnected.showDetect,
+      disconnected.showSwitch,
+    ]).toEqual([true, false, false]);
+
+    const wrongNetwork = walletView({
+      ...initialState(),
+      wallet: {
+        status: "wrong-network",
+        address: "0x8888888888888888888888888888888888888888",
+        chainIdHex: "0x1",
+      },
+    });
+    expect([wrongNetwork.showConnect, wrongNetwork.showSwitch]).toEqual([
+      false,
+      true,
+    ]);
+    expect(wrongNetwork.canDisconnect).toBe(true);
+
+    const connected = walletView({
+      ...initialState(),
+      wallet: { status: "connected", address: "0xa", chainIdHex: RABDI },
+    });
+    expect([
+      connected.showConnect,
+      connected.showDetect,
+      connected.showSwitch,
+    ]).toEqual([false, false, false]);
+    expect(connected.canDisconnect).toBe(true);
+  });
 });
 
 describe("publishView", () => {

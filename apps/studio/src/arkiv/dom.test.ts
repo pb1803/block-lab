@@ -1,5 +1,6 @@
 import { validateExperimentMetadata } from "@blocklab/arkiv-metadata";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { RABDI_CHAIN_ID_HEX } from "./config.js";
 import { ArkivController } from "./controller.js";
 import { mountArkivCompare, mountStudioArkiv } from "./dom.js";
 import { arkivRecordFromRow } from "./record.js";
@@ -174,6 +175,44 @@ afterEach(() => {
 });
 
 describe("mountStudioArkiv", () => {
+  /** Wallet action stubs, with just enough bookkeeping to assert wiring. */
+  function walletStubs() {
+    const calls = {
+      connect: 0,
+      detect: 0,
+      switchNetwork: 0,
+      disconnect: 0,
+    };
+    return {
+      calls,
+      wallet: {
+        connect: () => {
+          calls.connect += 1;
+        },
+        detect: () => {
+          calls.detect += 1;
+        },
+        switchNetwork: () => {
+          calls.switchNetwork += 1;
+        },
+        disconnect: () => {
+          calls.disconnect += 1;
+        },
+      },
+    };
+  }
+
+  function mountWith(controller: ArkivController) {
+    const container = makeContainer();
+    const stubs = walletStubs();
+    mountStudioArkiv(container as never, controller, {
+      wallet: stubs.wallet,
+      loadLocalRecord: () => null,
+      openByKey: () => null,
+    });
+    return { container, calls: stubs.calls };
+  }
+
   it("renders the missing-wallet state with publish disabled", () => {
     const container = makeContainer();
     const controller = new ArkivController({ gateway: null });
@@ -193,6 +232,114 @@ describe("mountStudioArkiv", () => {
     expect(allText(findByTestId(container, "sr-history-list"))).toContain(
       "Run a query to list records.",
     );
+  });
+
+  it("shows Connect, and hides Detect, once a provider exists but nobody is authorized", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container } = mountWith(controller);
+    controller.walletDisconnected();
+
+    expect(findByAction(container, "connect").hidden).toBe(false);
+    expect(findByAction(container, "detect").hidden).toBe(true);
+    expect(findByAction(container, "switch-network").hidden).toBe(true);
+    expect(findByAction(container, "disconnect").hidden).toBe(true);
+    expect(findByTestId(container, "sr-wallet-status").textContent).toContain(
+      "Wallet not connected.",
+    );
+  });
+
+  it("clicking Connect invokes the wallet connection flow once", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container, calls } = mountWith(controller);
+    controller.walletDisconnected();
+
+    click(container, findByAction(container, "connect"));
+    expect(calls.connect).toBe(1);
+    expect(calls.detect).toBe(0);
+  });
+
+  it("propagates a rejected connection to the caller without faking a state", () => {
+    const controller = new ArkivController({ gateway: null });
+    const container = makeContainer();
+    let rejection: unknown;
+    mountStudioArkiv(container as never, controller, {
+      wallet: {
+        connect: () => {
+          rejection = { code: 4001 };
+        },
+        detect: () => undefined,
+        switchNetwork: () => undefined,
+        disconnect: () => undefined,
+      },
+      loadLocalRecord: () => null,
+      openByKey: () => null,
+    });
+    controller.walletDisconnected();
+
+    click(container, findByAction(container, "connect"));
+    expect(rejection).toEqual({ code: 4001 });
+    // The state only changes when the app says so: nothing is simulated here.
+    expect(controller.state.wallet.status).toBe("disconnected");
+    expect(findByAction(container, "connect").hidden).toBe(false);
+  });
+
+  it("offers Detect (not Connect) when no wallet is injected", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container, calls } = mountWith(controller);
+    controller.walletMissing();
+
+    expect(findByAction(container, "detect").hidden).toBe(false);
+    expect(findByAction(container, "connect").hidden).toBe(true);
+    click(container, findByAction(container, "detect"));
+    expect(calls.detect).toBe(1);
+  });
+
+  it("reveals the explicit switch and disconnect only on the wrong network", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container, calls } = mountWith(controller);
+    controller.walletConnected("0xa", "0x1");
+
+    expect(findByAction(container, "switch-network").hidden).toBe(false);
+    expect(findByAction(container, "disconnect").hidden).toBe(false);
+    expect(findByAction(container, "disconnect").disabled).toBe(false);
+    expect(findByAction(container, "connect").hidden).toBe(true);
+
+    click(container, findByAction(container, "switch-network"));
+    expect(calls.switchNetwork).toBe(1);
+    // No silent switching: the click is what asks the wallet.
+    expect(controller.state.wallet.status).toBe("wrong-network");
+  });
+
+  it("offers Disconnect, and no switch, once connected on Rabdi", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container, calls } = mountWith(controller);
+    controller.walletConnected("0xa", RABDI_CHAIN_ID_HEX);
+
+    expect(findByAction(container, "disconnect").hidden).toBe(false);
+    expect(findByAction(container, "switch-network").hidden).toBe(true);
+    expect(findByAction(container, "connect").hidden).toBe(true);
+
+    click(container, findByAction(container, "disconnect"));
+    expect(calls.disconnect).toBe(1);
+  });
+
+  it("re-renders the actions on account and chain change events", () => {
+    const controller = new ArkivController({ gateway: null });
+    const { container } = mountWith(controller);
+
+    controller.walletConnected("0xa", RABDI_CHAIN_ID_HEX);
+    expect(findByAction(container, "disconnect").hidden).toBe(false);
+
+    // Chain change to another network: switch appears, connect stays hidden.
+    controller.chainChanged("0x1");
+    expect(findByAction(container, "switch-network").hidden).toBe(false);
+    expect(findByAction(container, "connect").hidden).toBe(true);
+
+    // Account revoked in the wallet: Connect comes back.
+    controller.walletDisconnected();
+    expect(findByAction(container, "connect").hidden).toBe(false);
+    expect(findByAction(container, "disconnect").hidden).toBe(true);
+    expect(findByAction(container, "switch-network").hidden).toBe(true);
   });
 
   it("wires the connect button to the wallet action", () => {

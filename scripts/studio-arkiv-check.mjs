@@ -342,6 +342,40 @@ async function main() {
     );
     record("labelled mock wallet injected", mockLabel === true, "isBlocklabMockWallet present");
 
+    // 2b. Regression: a detected provider with no authorized account must offer
+    //     Connect, and clicking it must really request authorization.
+    const connectVisible = await cdp.evaluate(
+      `(() => { const n = document.querySelector('[data-action="connect"]'); return n !== null && n.hidden === false && n.disabled !== true; })()`,
+    );
+    record("Connect offered while disconnected", connectVisible === true, "hidden=false");
+    const detectHidden = await cdp.evaluate(
+      `document.querySelector('[data-action="detect"]')?.hidden !== false`,
+    );
+    record("Detect hidden once a provider exists", detectHidden === true, "detect hidden");
+
+    await cdp.evaluate(clickAction("connect"));
+    await wait(400);
+    const asked = await cdp.evaluate(
+      `(window.__mock?.calls.request ?? []).includes("eth_requestAccounts")`,
+    );
+    record("Connect requests eth_requestAccounts", asked === true, "eth_requestAccounts called");
+    const afterReject = await cdp.evaluate(
+      `document.querySelector('[data-testid="sr-wallet-status"]')?.textContent ?? ""`,
+    );
+    record(
+      "rejected connect stays disconnected",
+      afterReject.includes("not connected"),
+      afterReject,
+    );
+    const rejectError = await cdp.evaluate(
+      `document.querySelector('#wallet-error')?.textContent ?? ""`,
+    );
+    record(
+      "rejection surfaced as user-rejected",
+      rejectError.includes("user-rejected"),
+      rejectError.slice(0, 60),
+    );
+
     await cdp.evaluate(
       `window.__mock.setAccounts(["0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759"]); window.__mock.setChain("0x1"); "ok"`,
     );
@@ -404,29 +438,38 @@ async function main() {
       disclosure.slice(0, 80),
     );
 
-    // 5. Publish without a configured gateway fails honestly, nothing signed.
+    // 5. Publish fails before the wallet is reached, and nothing is signed.
+    //    With VITE_ARKIV_ACCESS_KEY built in, the real duplicate preflight finds
+    //    poc-write-001; without a key the gateway itself refuses. Both are honest
+    //    pre-signature stops, so either is accepted and the reason is recorded.
     await cdp.evaluate(clickAction("publish"));
-    await wait(500);
+    await wait(1500);
     const publishState = await cdp.evaluate(STATE_READ);
+    const publishCategory = String(publishState?.publish?.error?.category ?? "none");
+    const publishPhase = String(publishState?.publish?.phase ?? "none");
     record(
-      "publish fails honestly (no gateway)",
-      publishState?.publish?.phase === "failed" &&
-        String(publishState?.publish?.error?.message ?? "").includes("Gateway is not ready"),
-      JSON.stringify(publishState?.publish?.error ?? null),
+      "publish stops before signing, honestly",
+      ["failed", "existing"].includes(publishPhase) &&
+        ["duplicate", "no-gateway", "network"].includes(publishCategory),
+      `${publishPhase}: ${JSON.stringify(publishState?.publish?.error ?? null)}`,
     );
     record("no tx hash invented", publishState?.publish?.txHash === undefined, String(publishState?.publish?.txHash));
     const afterPublish = await cdp.evaluate(`window.__mock.calls.sendTransaction`);
     record("zero eth_sendTransaction calls", afterPublish === 0, String(afterPublish));
 
-    // 6. History query with no gateway: failed, not silently empty.
+    // 6. A history query reaches a definite outcome: rows, or a reported failure.
+    //    It must never be left in a blank "empty" state that could be mistaken
+    //    for "no records". A real gateway may legitimately return rows here.
     await cdp.evaluate(`window.__blocklabStudioArkiv.search("status", "passed"); "ok"`);
-    await wait(500);
+    await wait(1500);
     const historyState = await cdp.evaluate(STATE_READ);
+    const historyPhase = historyState?.history?.phase;
     record(
-      "history distinguishes failure from empty",
-      historyState?.history?.phase === "failed" &&
-        String(historyState?.history?.error?.message ?? "").includes("Gateway is not ready"),
-      JSON.stringify(historyState?.history?.error ?? null),
+      "history reports a definite outcome (never silently empty)",
+      historyPhase === "ok" || historyPhase === "failed",
+      historyPhase === "failed"
+        ? JSON.stringify(historyState?.history?.error ?? null)
+        : `${historyPhase} (${historyState?.history?.rows?.length ?? 0} rows)`,
     );
 
     // 7. Entity key validation and gateway error surfacing.

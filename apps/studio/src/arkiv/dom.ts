@@ -99,8 +99,9 @@ export function mountStudioArkiv(
     refs.walletStatus.textContent = view.wallet.statusText;
     refs.walletChain.textContent = view.wallet.chainLine;
     setTone(refs.walletStatus, statusTone(view.wallet.status));
-    refs.connectButton.hidden = view.wallet.status !== "missing";
-    refs.detectButton.hidden = view.wallet.status !== "missing";
+    refs.connectButton.hidden = !view.wallet.showConnect;
+    refs.detectButton.hidden = !view.wallet.showDetect;
+    refs.disconnectButton.hidden = !view.wallet.canDisconnect;
     refs.disconnectButton.disabled = !view.wallet.canDisconnect;
     refs.switchButton.hidden = !view.wallet.showSwitch;
 

@@ -172,6 +172,12 @@ panel adds exactly one write path (Publish), and only from an explicit click.
 
 ### Verification
 
+- Wallet actions are decided in `walletView` (`showConnect` / `showDetect` /
+  `showSwitch` / `canDisconnect`) and the DOM only obeys them, so the two cannot
+  drift: `missing` → *Detect wallet*; `disconnected` → *Connect wallet*;
+  `wrong-network` → *Switch to Rabdi* (explicit) + *Disconnect*; `connected` →
+  *Disconnect*. Connect is exactly the `eth_requestAccounts` click; nothing is
+  auto-detected into a fake connection.
 - Unit tests in `src/arkiv/*.test.ts` cover the reducer, wallet adapter
   (fake EIP-1193 provider), record decode/validation/redaction, gateway
   mapping, controller flows (duplicate, rejection, uncertainty, races), and the
