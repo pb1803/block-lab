@@ -1,11 +1,16 @@
 # ARK-06 — real entity expiry, investigation and experiment plan
 
-**Status: INVESTIGATION ONLY — PARTIAL.** No transaction was broadcast, no wallet
-was connected or asked to sign, no entity was created, extended or deleted. Every
-chain number below was read over RPC. Nothing here claims that an expiry
+**Status: INVESTIGATION + PREPARATION — PARTIAL.** No transaction was broadcast, no
+wallet was connected or asked to sign, no entity was created, extended or deleted.
+Every chain number below was read over RPC. Nothing here claims that an expiry
 transition was *observed*; ARK-06 stays PARTIAL until the experiment in
 [§7](#7-experiment-design) has run and an expired entity has been read back and
 independently checked.
+
+The implementation that runs §7 now exists — the `--expect-expired` verifier and
+the `ark06-expiry-001` probe, both dry-run verified — and is documented in
+[docs/arkiv-ark06b.md](arkiv-ark06b.md). The live half is still pending
+authorization.
 
 ## 1. Objective and boundaries
 
@@ -445,13 +450,13 @@ without one.
 
 ## 13. Notes for the execution stage
 
-- Script shape follows the existing `scripts/` pattern (bare-specifier imports, so
-  the file must live in `apps/studio/scripts/`), driver-style single exit path
-  (`Stop` not `process.exit()` while sockets are open).
-- `verify:entity` currently treats a read failure as `FAILED … exit 1`
-  (`apps/studio/scripts/verify-entity.mjs:114-117`). Post-expiry that is the
-  *expected* result, so the execution stage should add an `--expect-expired` flag
-  rather than hand-wave a pass. That is a code change and is deferred, not done here.
+- **Done in ARK-06B:** the probe lives at `apps/studio/scripts/arkiv-06-probe.mjs`
+  (`probe:ark06` dry-run, `probe:ark06:live` armed), with the poller in-process and
+  armed before the create.
+- **Done in ARK-06B:** `verify:entity` grew `--expect-expired` (and `--expires-at`),
+  which expects the documented missing result instead of a live row and never treats
+  a failed lookup as expiry. See [docs/arkiv-ark06b.md](arkiv-ark06b.md) for the
+  verdict table, exit codes and dry-run evidence.
 - The probe id is not a frozen record id, so `studio-mm-test-record.mjs` and its two
   pinned hashes stay untouched; the probe builds and validates its own metadata with
   the shared package instead of a profile.

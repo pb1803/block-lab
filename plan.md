@@ -412,6 +412,19 @@ mined, the entity reads back, every payload field matches, actual gas was
     Design and success criteria: [docs/arkiv-ark06.md](docs/arkiv-ark06.md). ARK-06
     stays PARTIAL — nothing has expired yet.
 
+    ARK-06B then built both sides without broadcasting: a `--expect-expired` mode for
+    `verify:entity` that only passes on the documented missing result at/past the
+    deadline, with the deadline taken from the `EntityCreated` event on `--tx` (or an
+    explicit `--expires-at`), and distinct exit 5 for "the lookup could not be read"
+    so a failed query can never be sold as an expiry — 19 unit tests. The probe
+    (`ark06-expiry-001`, 5 blocks) is dry-run by default and cannot broadcast; under
+    `--live` it predicts the key with `NO_SALT` before signing, arms the poller
+    first, never retries a create (it reconciles through the entity nonce instead),
+    and prints the independent verification command. Dry-run: 8/8 preflight,
+    payload validated, poller exercised, verifier exercised across all nine branches
+    including a real `EntityCreated` decode — nothing broadcast. See
+    [docs/arkiv-ark06b.md](docs/arkiv-ark06b.md).
+
 Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
 25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
 the publication claim rests on the read-back above, never on a mock run).

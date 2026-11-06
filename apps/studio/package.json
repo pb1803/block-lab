@@ -11,6 +11,8 @@
     "build": "tsc -p tsconfig.json && vite build",
     "dev": "vite",
     "preflight:test": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-preflight.mjs",
+    "probe:ark06": "node --env-file=../arkiv-poc/.env.local scripts/arkiv-06-probe.mjs",
+    "probe:ark06:live": "node --env-file=../arkiv-poc/.env.local scripts/arkiv-06-probe.mjs --live",
     "preview": "vite preview",
     "record:ark05": "node scripts/studio-mm-002-record.mjs",
     "record:test": "node scripts/studio-mm-test-record.mjs",

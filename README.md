@@ -153,8 +153,9 @@ evidence in [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 What is **not** claimed: no
 observed entity expiry. ARK-06 is investigation-only — the protocol rules are
 settled from SDK source and a 5-block probe is designed, but nothing was watched
-die, so `expiresAt` stays a recorded block rather than an observed transition
-([docs/arkiv-ark06.md](docs/arkiv-ark06.md)). These stay experiments, not claims.
+die, so `expiresAt` stays a recorded block rather than an observed transition. The
+verifier and probe for it exist and are dry-run verified, with no transaction sent
+([docs/arkiv-ark06.md](docs/arkiv-ark06.md), [docs/arkiv-ark06b.md](docs/arkiv-ark06b.md)). These stay experiments, not claims.
 See [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 ## Studio Arkiv history

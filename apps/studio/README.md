@@ -249,6 +249,21 @@ and Transfer ownership (`changeOwnership`).
     driver now also exits through one path (socket closed in `finally`,
     `process.exitCode` set) because forcing `process.exit()` over live socket
     handles aborts Node on Windows and loses the documented exit code.
+- Expiry experiment tooling for ARK-06 (design in
+  [docs/arkiv-ark06.md](../../docs/arkiv-ark06.md), implementation in
+  [docs/arkiv-ark06b.md](../../docs/arkiv-ark06b.md)):
+  - `verify:entity --entity 0x… --expect-expired` asks the opposite question of a
+    normal verify: the entity is expected to be **gone**. It passes only on the
+    documented missing result at or past the expiry block, with the deadline taken
+    from the `EntityCreated` event on `--tx` (or an explicit `--expires-at` when no
+    tx is available). A lookup that merely failed is never reported as expiry.
+    Exit 0 only when expiry is genuinely verified, 1 when it is not (still live,
+    not yet expired, deadline unknown), 5 when the lookup could not be read.
+  - `probe:ark06` is the whole experiment in **dry-run**: it cannot broadcast. It
+    validates the payload and the expiry parameters, runs the read-only preflight,
+    and exercises the poller. `probe:ark06:live` is the separate arming switch for
+    the single authorized create; afterwards it reports the sampled boundary and
+    prints the independent post-expiry verification command.
 - Configuration: `VITE_ARKIV_ACCESS_KEY` enables the read/write gateway. Without
   it the panel is display-only and every gateway-dependent action reports
   "Gateway is not ready." — no silent fallback.
