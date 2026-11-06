@@ -279,15 +279,15 @@ local-agent boundary, but the comparison panel stays read-only.
 1. Use `@arkiv-network/sdk@1.0.1` with Viem. (**done, verified 1.0.1 / viem 2.57.16**)
 2. Configure Rabdi testnet and a documented access key. (**done** — chain id `7794095`/`0x76edaf` verified live; access key via `VITE_ARKIV_ACCESS_KEY`, git-ignored; `""` = public rate-limited endpoint.)
 3. Use a dedicated testnet signer without source-code secrets. (**done** — signing stays in the browser wallet via EIP-1193; `try-write.mjs` uses an env-provided key only, and refuses to sign without a balance.)
-4. Write one compact experiment entity. (**partially blocked** — code complete (`createEntity` after a duplicate preflight and a checkbox), but no real write: zero tGLM, faucet needs a browser wallet, anonymous `arkiv_query` budget exhausted. Nothing was signed.)
-5. Query it by indexed attributes. (**verified read-only** — schema-tagged `arkiv_query` returns live `posts` entities; the `blocklab.experiment` schema and sample record validate.)
-6. Retrieve its payload and system metadata. (**verified on public entities** — `getEntity` returns key + owner/creator/expiresAt; strict payload decode covered by tests.)
-7. Verify ownership and creator behavior from live results. (**partial** — observed as `owner == creator` on public `posts`; no two-wallet experiment, so no claim made.)
-8. Verify expiry behavior. (**not experimentally verified** — SDK semantics read (`fromDays`, max cap, `max(expiresAt, currentBlock + minLifetime)`); needs a real write + wait.)
-9. Record transaction and explorer evidence. (**not done** — requires the blocked write.)
-10. Decide the smallest user-facing history feature. (**deferred to Phase 15**; Studio integration stays gated on a real write/query/retrieve run.)
+4. Write one compact experiment entity. (**done, verified 2026-11-06** — exactly one real `createEntity` signed and mined: tx `0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05`, block `269199`, entity `0x1d7b6bf841deab1a003cc7c1fa407b97e7e27fb6de276dc287b8e2e0551bb31a`, gas `0.000209105 tGLM`.)
+5. Query it by indexed attributes. (**verified** — schema-tagged `arkiv_query` returns live `posts` entities and now also the published `blocklab.experiment` record by `experimentId`.)
+6. Retrieve its payload and system metadata. (**verified** — the published entity was read back with `getEntity`; on-chain payload bytes are byte-identical to the canonical record and re-validate (603 bytes, SHA-256 `410e3d5c…38f4d`).)
+7. Verify ownership and creator behavior from live results. (**partial** — the published entity has `owner == creator ==` the signing wallet; no two-wallet experiment, so no claim on transfer behaviour.)
+8. Verify expiry behavior. (**partial** — the published entity reports `expiresAt` block `571599` == 7 days from creation per `expiryDays`; no observation of an entity actually expiring.)
+9. Record transaction and explorer evidence. (**done** — explorer page 200; tx/entity recorded in `docs/arkiv-poc.md`.)
+10. Decide the smallest user-facing history feature. (**deferred to Phase 15**; Studio integration now has a real write/query/retrieve run to gate on.)
 
-**Exit gate:** A real write/query/retrieve flow succeeds, or Arkiv is excluded without mock claims. **Not met cleanly:** the POC is verified live read-only, the write path is verified only up to a rejected wallet signature (mock wallet), and the real write is blocked by infrastructure (faucet + no funds + exhausted anonymous budget). Arkiv stays out of Studio until a real run exists; the write is not excluded, because the only missing pieces are external (testnet funds/access key).
+**Exit gate:** A real write/query/retrieve flow succeeds, or Arkiv is excluded without mock claims. **Met (2026-11-06):** one real, confirmed, verified publication exists (see docs/arkiv-poc.md); the write/query/retrieve loop is proven end to end with the harness signer. Two deliberate follow-ups remain experiments (two-wallet ownership, waiting out an expiry), not blockers.
 
 **Phase 14B status (2026-11-05):** unblocked and pre-verified. The signer was
 rotated after an exposure report, funded with `5 tGLM` (on-chain transfer
@@ -298,8 +298,10 @@ preflight for `poc-write-001`, funds coverage vs the SDK worst-case gas cap)
 and reports 8/8 PASS with the signer holding `5 tGLM`. The write harness
 `try-write.mjs` is idempotent (`poc-write-001`, live duplicate preflight
 shared with the browser gateway, bounded transport, post-failure re-check
-instead of blind re-signing). The first publication has **not** been signed;
-it waits for explicit approval.
+instead of blind re-signing). The publication is **done and verified**: with
+approval, the harness signed exactly one real `createEntity`; the receipt is
+mined, the entity reads back, every payload field matches, actual gas was
+`0.000209105 tGLM`. Details and evidence: `docs/arkiv-poc.md`.
 
 ## Phase 15 — Arkiv experiment history
 

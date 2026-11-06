@@ -150,22 +150,20 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 
 - **ARK-01 DONE**: `@arkiv-network/sdk@1.0.1` + viem `2.57.16` in `apps/arkiv-poc` only; package and live Rabdi facts verified (`0x76edaf`, 2 s blocks).
 - **ARK-02 DONE**: no private key in source; signing is wallet-side EIP-1193; access key optional and git-ignored.
-- **ARK-03 READY (pre-verified, awaiting explicit approval)**: the harness is
-  idempotent (`poc-write-001`, live duplicate preflight shared with the gateway,
-  post-failure re-check, no blind retry). The rotated signer
-  `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` (key in git-ignored
-  `apps/arkiv-poc/.env.local`) now holds `5 tGLM` — funding transfer
-  `0x79513168f51255074564bdd79bff0ce72071fe4be6f62a6b1d74c94899611f1a` verified
-  on-chain (block 268498, receipt success, gas 21000) — and
-the access key is configured. `scripts/prepub-check.mjs` reports
-  8/8 PASS live and read-only. No write transaction has been signed yet; the
-  first publication runs only after explicit approval. No tx hash of a write or
-  entity key exists; nothing is claimed.
-- **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. An indexed `blocklab.experiment` record was not written.
-- **ARK-05 PARTIAL**: `owner == creator` observed on public `posts` entities; no two-wallet experiment.
-- **ARK-06 NOT-VERIFIED**: SDK expiry semantics read only; no live expired-record observation.
-- **ARK-07 PARTIAL**: user-signs-without-pasting-key is proven up to the rejection; a real Studio write waits for ARK-03.
-- **SUB-03 stays open**: no claim of a working write/query/retrieve integration is made until ARK-03 clears.
+- **ARK-03 DONE (2026-11-06)** — first real publication signed, mined and
+  verified. Exactly one `createEntity`: tx
+  `0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05`, block
+  `269199`, entity `0x1d7b6bf841deab1a003cc7c1fa407b97e7e27fb6de276dc287b8e2e0551bb31a`,
+  actual gas `0.000209105 tGLM`. Signer `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759`
+  (rotated after exposure; key in git-ignored `apps/arkiv-poc/.env.local`).
+  Read-back verified: entity queryable by key, `owner == creator ==` signer,
+  expiresAt block `571599`, on-chain payload byte-identical to the canonical
+  record and re-validating (603 bytes, SHA-256 `410e3d5c…38f4d`).
+- **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. The published `blocklab.experiment` record is now findable by `experimentId` too.
+- **ARK-05 PARTIAL**: `owner == creator` verified on the published entity and on public `posts` entities; no two-wallet experiment, so nothing is claimed about transfer behaviour.
+- **ARK-06 PARTIAL**: the published entity reports `expiresAt` block `571599` (7 days from creation, matching `expiryDays`); no observation of an entity actually expiring.
+- **ARK-07 PARTIAL**: user-signs-without-pasting-key is proven up to the rejection in a headless browser; the real write was driven by the harness signer, not a browser wallet end to end.
+- **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
 
 ## ENSv2 conditional
 

@@ -8,18 +8,18 @@ The real entity write had **not** happened at that point (the harness signer
 held `0 tGLM`), so the browser write path was verified only up to the wallet's
 signature request, with a deliberately mock wallet that rejects it.
 
-**Phase 14B** (2026-11-05) prepared the environment for the first real
-publication. The signer was rotated after an exposure report, funded with
-`5 tGLM` (on-chain transfer verified), and an Arkiv access key is configured
-locally. All eight pre-publication checks pass live and read-only
-(`scripts/prepub-check.mjs`: funding transaction, balance, key/address match,
-secret hygiene, access keys, authenticated RPC, duplicate preflight, funds).
-**No real transaction has been signed yet, and no entity key exists:** the
-publication runs only after explicit approval. Nothing below claims a write
-that did not happen.
-
-Nothing in this document claims a write, a transaction hash, an entity key, an
-ownership experiment or an expiry experiment that did not happen.
+**Phase 14B/14C** (2026-11-05/2026-11-06) unblocked and performed the first
+**real publication**. The signer was rotated after an exposure report, funded
+with `5 tGLM` (on-chain transfer verified), and an Arkiv access key is
+configured locally. All eight pre-publication checks passed live and read-only
+(`scripts/prepub-check.mjs`). With explicit approval, the harness signed and
+confirmed exactly one `createEntity` (2026-11-06): transaction
+`0xed989cbe…573f05` in block `269199`, entity
+`0x1d7b6bf8…b31a` with `owner == creator ==` the signer, expiring at block
+`571599`. The entity was read back and **every stored field verified
+byte-for-byte** against the submitted canonical payload (603 bytes, SHA-256
+`410e3d5c…38f4d`). Nothing below claims a publish beyond this one verified
+record.
 
 ## Unblocking the first real publication (Phase 14B)
 
@@ -35,7 +35,7 @@ funded or used:
 | Item | Value |
 |---|---|
 | Signer address | `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` |
-| Balance (verified live, 2026-11-05) | `5 tGLM` |
+| Balance (live, 2026-11-06, after the write) | `4.999790895 tGLM` |
 | Where the key lives | `apps/arkiv-poc/.env.local` (`ARKIV_PRIVATE_KEY`, git-ignored) |
 
 ### Faucet (funding) — verified, human step
@@ -94,7 +94,7 @@ transfers. Verified funding transaction:
 (block `268498`, `2026-11-05T23:52:36Z`, `5.000000 tGLM`, receipt status
 success, gas used `21000`) — the full balance, from a single deposit.
 
-### Publication command (not run yet)
+### Publication command (now run once, verified)
 
 ```bash
 pnpm --filter @blocklab/arkiv-poc exec node --env-file=.env.local scripts/try-write.mjs
@@ -106,6 +106,52 @@ The harness checks chain id `7794095`, runs the duplicate preflight for
 an explorer link, reads the entity back, and compares the on-chain fields
 (experimentId, experimentType, scenarioName, status, targetChainId, startedAtMs)
 against the submitted record.
+
+### The first real publication (2026-11-06, verified)
+
+Authorized run, exactly one `createEntity` (exit code `0`, no retries):
+
+```text
+chain id: 7794095
+preflight: no entity with experimentId "poc-write-001"
+signer: 0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759 (from .env.local, value not printed)
+balance: 5000000000000000000 wei (5 tGLM)
+writing entity through schema "blocklab.experiment"…
+tx hash: 0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05
+entity key: 0x1d7b6bf841deab1a003cc7c1fa407b97e7e27fb6de276dc287b8e2e0551bb31a
+expires at block: 571599
+explorer: https://rabdi.explorer.arkiv.network/tx/0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05
+```
+
+Independent read-only verification after the run (receipt + entity fetch):
+
+* **Receipt:** status `0x1` (success), block `269199` (== the entity's
+  `createdAtBlock`), `from` = the signer, `to` = the Arkiv contract
+  `0x4400…0044`.
+* **Actual gas:** `209105` gas × `1 gwei` effective gas price =
+  **`0.000209105 tGLM`** (post-write balance `4.999790895 tGLM`, i.e.
+  `5 − 0.000209105`).
+* **Entity:** key `0x1d7b6bf8…b31a`; `owner == creator ==` the signer;
+  `createdAtBlock == updatedAtBlock == 269199`; `expiresAt` block `571599`
+  (269199 + 302 400 = 7 days at 2 s blocks, matching `expiryDays: 7`);
+  `creationFlags` all `0`.
+* **Payload (603 bytes):** re-validated by `validateExperimentMetadata`, and the
+  on-chain bytes are **byte-identical** to the canonical encoding of the
+  submitted record. Every allowlisted field matches: `schemaVersion "1.0"`,
+  `experimentId poc-write-001`, `experimentType rpc-blackout`, `scenarioName
+  "RPC blackout (write probe)"`, `targetChainId 31337`, `status passed`,
+  `requestCount 40`, `succeededCount 34`, `failedCount 6`, `rpcFailureCount 6`,
+  `latency {averageMs 128, p50Ms 96, p95Ms 310, maxMs 512}`, `evidenceDigest
+  3f3f3f…3f3f`, `evidenceRef evidence/poc-write/result.json`, `expiryDays 7`.
+* **Timestamps:** `startedAtMs`/`completedAtMs` in the payload differ by exactly
+  `30 000 ms` and both match the run window; the indexed `startedAtMs` attribute
+  equals the payload value (`1793924125113`).
+* **Digest:** SHA-256 of the on-chain payload bytes == the canonical digest
+  `410e3d5c1a97ed718ff1fd596bdea945bf49422176c192a8c7f56b2acce38f4d`.
+
+This is one real, confirmed write, not a mock: the private key signed a real
+transaction on Rabdi, the receipt is mined, and the entity is readable and
+verified.
 
 ### Why re-runs are safe
 
@@ -319,6 +365,16 @@ The funds check is bounded by the SDK's own constants: `MAX_TRANSACTION_GAS`
 the worst-case cap. The expected cost of one publication is about
 `0.000033 tGLM` at a `1 gwei` gas price.
 
+### First real publication (2026-11-06, confirmed)
+
+Full evidence is in “The first real publication” above. Summary: transaction
+`0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05` in block
+`269199` (receipt status `0x1`), actual gas `0.000209105 tGLM` (209105 gas ×
+`1 gwei`); entity `0x1d7b6bf841deab1a003cc7c1fa407b97e7e27fb6de276dc287b8e2e0551bb31a`
+with `owner == creator ==` the signer, expiresAt block `571599`; on-chain
+payload 603 bytes byte-identical to the canonical record, SHA-256
+`410e3d5c1a97ed718ff1fd596bdea945bf49422176c192a8c7f56b2acce38f4d`.
+
 ### Unit tests
 
 * `packages/arkiv-metadata`: 41 tests (schema, strict validation, canonical
@@ -332,27 +388,29 @@ the worst-case cap. The expected cost of one publication is about
 
 ## Blockers (honest state)
 
-1. **The publication itself has not run.** Funding was the only real blocker
-   and it is cleared (signer `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` holds
-   `5 tGLM`); publication waits for explicit approval, so there is still no real
-   transaction hash of a write and no entity key. Once approved, one command
-   completes and verifies the publication (see above).
+1. **The first real publication is done and verified.** No blocker remains on
+   the write path: one `createEntity` was signed and confirmed (2026-11-06),
+   the entity reads back and every payload field matches. The only next steps
+   are the deliberate experiments below, not a write problem.
 2. **Anonymous query budget — mitigated by the access key.** Without a key the
    public endpoint answers `arkiv_query` with HTTP 429 and
    `{"error":"ANON_COST_LIMITED",...}`. With `ARKIV_ACCESS_KEY` configured the
-   same reads return consistently (3/3 rounds in the check above). The POC still
-   surfaces a failed duplicate check as a fast `[network]` error and refuses to
-   continue a write whose duplicate check could not run.
-3. **Owner/creator semantics not experimentally verified.** Only observed
-   indirectly on public `posts` entities, where `owner == creator == author`. No
-   two-wallet experiment (write as A, read as B, change ownership) was run, so no
-   claim is made about creator preservation on transfer.
-4. **Expiry not experimentally verified.** SDK semantics were read
-   (`fromDays`, `atLeast`, expiry resolves as `max(expiresAt, currentBlock +
-   minLifetime)`, max lifetime cap) but no expired-record observation was made:
-   that needs a real write plus a wait beyond a chosen lifetime.
+   same reads return consistently. The POC still surfaces a failed duplicate
+   check as a fast `[network]` error and refuses to continue a write whose
+   duplicate check could not run.
+3. **Owner/creator semantics: verified only for the single-wallet case.** On the
+   published entity, `owner == creator ==` the signing wallet, matching what was
+   observed on public `posts` entities. No two-wallet experiment (write as A,
+   read as B, transfer ownership) has been run, so nothing is claimed about
+   creator preservation on transfer.
+4. **Expiry: recorded, not waited out.** The entity reports `expiresAt` block
+   `571599` (7 days from creation), and that matches the record's `expiryDays`.
+   No observation exists of an entity actually expiring (that needs a write with
+   a short lifetime plus a wait beyond it).
 5. **Browser write not exercised end to end.** A headless browser has no wallet
-   extension, so the only browser-verified write path is the rejection path above.
+   extension, so the browser-only write path is still verified only up to the
+   wallet rejection. The real write was driven by the harness, which signs with
+   the dedicated testnet account from `.env.local`.
 
 ## Running the POC
 
@@ -377,7 +435,10 @@ the network only after a user click.
 
 ## What is deliberately not claimed
 
-* No write, transaction, entity key or explorer link.
+* **One** real write, transaction, entity key and explorer link are claimed
+  (2026-11-06, verified above); nothing beyond that single record is claimed —
+  no second write, no batch, no multi-wallet behaviour.
 * No anonymity, privacy or data-availability property.
-* No ownership/creator or expiry behaviour.
-* No Studio integration; Phase 15 stays gated on a real write/query/retrieve run.
+* No ownership-transfer or two-wallet experiment; no observed expiry transition.
+* No Studio integration; Phase 15 stays gated on the real write/query/retrieve
+  run, which now exists (this record).
