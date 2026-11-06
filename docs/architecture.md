@@ -98,6 +98,15 @@ its own browser path over the same contract (below).
 
 ### Studio Arkiv history
 
+A real browser-wallet publication (ARK-07) is a separate, human-approved run, not a
+test path: [arkiv-ark07.md](arkiv-ark07.md) documents the dedicated `studio-mm-001`
+probe record, the read-only `preflight:test` gate, and the CDP driver
+`apps/studio/scripts/studio-arkiv-live.mjs`, which requires a genuine MetaMask
+provider, checks balance and duplicates before signing, waits for the mined
+receipt, and re-reads the entity from a separate process for a byte comparison.
+The mocked browser check (`scripts/studio-arkiv-check.mjs`) is never evidence of a
+publication.
+
 `apps/studio/src/arkiv` promotes the POC into a Studio product feature once a real
 write/query/retrieve run existed (`poc-write-001`, verified in
 [arkiv-poc.md](arkiv-poc.md)). Boundaries:

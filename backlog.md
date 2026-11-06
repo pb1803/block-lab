@@ -141,7 +141,7 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
 | ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL |
 | ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | PARTIAL (expiresAt recorded; no observed expiry) |
-| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL (browser path verified to wallet rejection; real write is the harness-run `poc-write-001`) |
+| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL (tooling + all non-signing gates verified live; the MetaMask signature is the one step not yet performed — see [docs/arkiv-ark07.md](docs/arkiv-ark07.md)) |
 | ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | PARTIAL (implemented in Studio; empty/expired states unit-tested, live-queried only through the POC harness) |
 | ARK-09 | P1 | Implement validated local replay | ARK-08; CLI-05 | Retrieved definitions are validated before local execution | PARTIAL (retrieval + canonical revalidation DONE; execution in Studio is deliberately out of scope) |
 | ARK-10 | P1 | Complete evidence documentation | ARK-09 | Schema, friction, reach, rationale, and usage docs contain real evidence | DONE (architecture, Studio README, arkiv-poc.md, plan/backlog) |
@@ -162,7 +162,21 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 - **ARK-04 DONE (read-only)**: schema-tagged `arkiv_query`, `getEntity` hit + miss verified live; strict payload decode covered by tests. The published `blocklab.experiment` record is now findable by `experimentId` too.
 - **ARK-05 PARTIAL**: `owner == creator` verified on the published entity and on public `posts` entities; no two-wallet experiment, so nothing is claimed about transfer behaviour.
 - **ARK-06 PARTIAL**: the published entity reports `expiresAt` block `571599` (7 days from creation, matching `expiryDays`); no observation of an entity actually expiring.
-- **ARK-07 PARTIAL**: user-signs-without-pasting-key is proven up to the rejection in a headless browser; the real write was driven by the harness signer, not a browser wallet end to end.
+- **ARK-07 PARTIAL (2026-11-06)**: the browser-wallet write path is now buildable,
+  gated and attributable, but has not been signed. Added a dedicated test record
+  (`studio-mm-001`; `status: idle`, zero counts, fixed timestamp, digest of a
+  documented note — a publication probe, never a measured experiment), a read-only
+  live preflight (chain `7794095`, head block, duplicate query with the same schema
+  Studio writes with, explorer), and `apps/studio/scripts/studio-arkiv-live.mjs`, a
+  CDP driver that refuses anything whose `isMetaMask` is not true, checks balance
+  before any signing, re-runs the duplicate preflight, requires the pasted record to
+  match the canonical bytes, waits for the mined receipt, and re-reads the entity in
+  a separate process for a byte comparison. Verified live today: preflight 5/5
+  (`studio-mm-001` absent, head advancing), 11/11 DOM/state contract checks against
+  the built Studio in headless Chrome, and the driver refusing both a wallet-less
+  page and a non-MetaMask provider (exit 2, no transaction, no retry). The MetaMask
+  approval itself is a human click and has NOT happened, so no publication is
+  claimed and the runbook says so.
 - **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
 - **Phase 15 Studio integration (2026-11-06)**: `apps/studio/src/arkiv/` adds
   wallet connect/chain detection, gated publish with duplicate preflight and

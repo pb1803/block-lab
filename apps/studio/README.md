@@ -181,6 +181,22 @@ panel adds exactly one write path (Publish), and only from an explicit click.
   always 4001 on `eth_sendTransaction`) and asserts the gating throughout — it
   never claims a publication. Real publication remains the POC harness's
   verified result (`poc-write-001`).
+- Wallet-publication checks for ARK-07 (details in
+  [docs/arkiv-ark07.md](../../docs/arkiv-ark07.md)):
+  - `pnpm --filter @blocklab/studio run record:test` prints the deterministic
+    `studio-mm-001` probe record (`idle`, zero counts, fixed timestamp) used for a
+    real run; it never touches `poc-write-001`.
+  - `pnpm --filter @blocklab/studio run preflight:test` is the read-only gate:
+    access key present, chain `7794095`, head block readable, no duplicate for the
+    probe id, explorer reachable. It signs nothing.
+  - `pnpm --filter @blocklab/studio run verify:live -- --port 9229` drives a
+    real, debuggable Chrome with MetaMask: it refuses any provider whose
+    `isMetaMask` is not true, checks balance before signing, re-runs the duplicate
+    preflight, requires the pasted record to equal the canonical bytes and only
+    then waits for your MetaMask approval; afterwards it re-reads the entity in a
+    separate process and byte-compares the payload. Without `--arm-publish` it
+    waits for your Publish click. No private key is ever read, and a failed write
+    is re-checked once instead of retried.
 - Configuration: `VITE_ARKIV_ACCESS_KEY` enables the read/write gateway. Without
   it the panel is display-only and every gateway-dependent action reports
   "Gateway is not ready." — no silent fallback.

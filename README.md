@@ -178,6 +178,13 @@ node scripts/studio-arkiv-check.mjs --url http://localhost:5178/ --port 9552
 That run verifies wiring and gating, not a real publication; the only real
 publication claim remains the verified `poc-write-001` entity above.
 
+A real MetaMask publication is a separate, human-approved run, documented in
+[docs/arkiv-ark07.md](docs/arkiv-ark07.md): a deterministic `studio-mm-001` probe
+record, a read-only `preflight:test` gate, and a CDP driver that refuses any
+non-MetaMask provider, checks gas and duplicates before signing, and re-reads the
+entity in a separate process for a byte comparison. ARK-07 stays PARTIAL until
+that signature actually happens — no publication is claimed from tooling alone.
+
 ## Package manager
 
 pnpm is the chosen package manager and is configured as the repository workspace manager.

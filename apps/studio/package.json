@@ -10,7 +10,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "record:test": "node scripts/studio-mm-001-record.mjs",
+    "preflight:test": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-preflight.mjs",
+    "verify:live": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-live.mjs"
   },
   "dependencies": {
     "@arkiv-network/sdk": "1.0.1",

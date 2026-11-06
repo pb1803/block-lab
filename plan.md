@@ -355,6 +355,19 @@ mined, the entity reads back, every payload field matches, actual gas was
     (two-wallet ownership) and ARK-06 (observed expiry) remain PARTIAL and are
     not claimed.
 
+11. **PARTIAL** — ARK-07 real-wallet publication. The path is built, gated and
+    documented in [docs/arkiv-ark07.md](docs/arkiv-ark07.md): a dedicated
+    `studio-mm-001` probe record (`idle`, zero counts, fixed timestamp, digest of
+    a documented note), a read-only live preflight (`preflight:test`), and a CDP
+    driver (`apps/studio/scripts/studio-arkiv-live.mjs`) that refuses any provider
+    whose `isMetaMask` is not true, checks gas before signing, re-runs the
+    duplicate preflight, requires the pasted record to equal the canonical bytes,
+    waits for the mined receipt and re-reads the entity from a separate process.
+    Verified live: 11/11 DOM/state contract checks against the built Studio,
+    both refusal paths (no provider, non-MetaMask provider → exit 2), and preflight
+    5/5 against Rabdi. The MetaMask signature is a human click and has not been
+    performed, so ARK-07 stays PARTIAL and no second publication is claimed.
+
 Verification for this phase: 313 tests / 33 files, lint/typecheck/build clean, and
 a real headless-Chrome run (`scripts/studio-arkiv-check.mjs`, 20/20 checks) with a
 labelled mock wallet. That browser run verifies wiring and gating only; the real
