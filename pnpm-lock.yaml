@@ -83,12 +83,25 @@ importers:
 
   apps/studio:
     dependencies:
+      '@arkiv-network/sdk':
+        specifier: 1.0.1
+        version: 1.0.1(typescript@5.9.3)(viem@2.57.16(typescript@5.9.3))
+      '@blocklab/arkiv-metadata':
+        specifier: workspace:*
+        version: link:../../packages/arkiv-metadata
       '@blocklab/browser-rpc':
         specifier: workspace:*
         version: link:../../packages/browser-rpc
       '@blocklab/core':
         specifier: workspace:*
         version: link:../../packages/core
+      viem:
+        specifier: 2.57.16
+        version: 2.57.16(typescript@5.9.3)
+    devDependencies:
+      vite:
+        specifier: ^7.0.0
+        version: 7.3.7(@types/node@24.19.2)
 
   packages/arkiv-metadata: {}
 

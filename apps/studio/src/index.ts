@@ -13,6 +13,28 @@ export const studioShell: StudioShell = {
 };
 
 export {
+  ArkivController,
+  type ArkivGateway,
+  type ArkivRecord,
+  type ArkivWalletActions,
+  type CompareModel,
+  type CompareRow,
+  type CompareSide,
+  compareRecords,
+  createRabdiGateway,
+  DETAIL_DISCLAIMER,
+  detailRows,
+  type HistorySearchField,
+  mountArkivCompare,
+  mountStudioArkiv,
+  publicDisclosure,
+  RABDI_CHAIN_ID,
+  RABDI_CHAIN_ID_HEX,
+  type StudioArkivState,
+  type StudioError,
+  sourceLabel,
+} from "./arkiv/index.js";
+export {
   buildComparisonExport,
   type ComparisonExportOptions,
   type ComparisonExportResult,

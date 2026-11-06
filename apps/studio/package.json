@@ -4,13 +4,22 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.js",
-    "./comparison": "./dist/comparison/index.js"
+    "./comparison": "./dist/comparison/index.js",
+    "./arkiv": "./dist/arkiv/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@arkiv-network/sdk": "1.0.1",
+    "@blocklab/arkiv-metadata": "workspace:*",
     "@blocklab/browser-rpc": "workspace:*",
-    "@blocklab/core": "workspace:*"
+    "@blocklab/core": "workspace:*",
+    "viem": "2.57.16"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
   }
 }

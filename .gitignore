@@ -4,6 +4,7 @@ node_modules/
 
 # Build and framework output
 dist/
+dist-app/
 build/
 out/
 *.tsbuildinfo

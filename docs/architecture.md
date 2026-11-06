@@ -8,7 +8,7 @@
 - `@blocklab/runner` owns Node.js experiment lifecycle concerns, including process ownership, cancellation, loopback enforcement, and future proxy execution.
 - `@blocklab/evidence` owns redacted local result persistence, evaluation, digesting, and report formatting.
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
-- `apps/studio` is a browser-safe shell plus one read-only comparison panel. It renders payloads the host page already produced, never executes RPC requests, never polls, and does not anonymize anything. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
+- `apps/studio` is a browser-safe shell plus one read-only comparison panel and one wallet-mediated Arkiv history panel. The comparison panel renders payloads the host page already produced and never executes RPC requests; the Arkiv panel reads Arkiv through its gateway and publishes only through an explicit, wallet-signed action. Neither polls, and neither anonymizes anything. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
 - `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. It also exposes an optional Viem adapter (`@blocklab/browser-rpc/viem`, Viem as an optional peer dependency) that delegates every request to those transports. Nothing in the Node.js dependency graph imports it.
 - `@blocklab/arkiv-metadata` is the platform-neutral Arkiv record contract: schema version, allowlisted experiment metadata, strict validation, and canonical payload bytes plus digest. It has no dependencies and no I/O, so the CLI, the runner and the browser POC can all import it.
 - `apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It is the only workspace that imports `@arkiv-network/sdk`, uses a connected EIP-1193 wallet for signing, and writes one compact `blocklab.experiment` entity on the Rabdi testnet. The CLI, runner, core and Studio do not depend on it.
@@ -27,11 +27,11 @@ core
 ├── apps/cli ──> inspector, scenarios, runner, evidence
 ├── apps/sample-dapp ──> browser-rpc
 ├── apps/anon-rpc-poc ──> browser-rpc
-├── apps/studio ──> core, browser-rpc
+├── apps/studio ──> core, browser-rpc, arkiv-metadata, @arkiv-network/sdk (gateway only), viem
 ├── apps/arkiv-poc ──> arkiv-metadata, @arkiv-network/sdk, viem
 ```
 
-The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv follows the same isolation rule: the SDK lives only in `apps/arkiv-poc`, and Studio integration waits until a real write/query/retrieve run exists (see [arkiv-poc.md](arkiv-poc.md)).
+The browser-only Anon-RPC harness stays outside the Node.js CLI dependency graph: `@blocklab/browser-rpc` is never imported by `apps/cli`, `@blocklab/runner`, `@blocklab/core`, or `@blocklab/evidence`, and `blocklab --help`/`blocklab config` state that Anon-RPC is browser-only and never emulated. The harness itself is reached through a lazy `import()` inside the Anon-RPC transport, so a direct-only session never downloads or evaluates the sandbox. Arkiv follows the same isolation rule: the SDK is imported only by `apps/arkiv-poc` and by Studio's browser gateway module, never by the Node.js graph. Studio's history panel reuses the POC's proven contract after a real write/query/retrieve run existed (see [arkiv-poc.md](arkiv-poc.md)).
 
 ### Studio comparison view
 
@@ -93,8 +93,46 @@ the comparison workflow on top of the same transports.
 
 The record itself lives in `@blocklab/arkiv-metadata`, which the CLI and runner
 can import without pulling in the SDK. Detailed evidence stays local; only the
-validated record is written. No part of the POC is wired into Studio, and Phase
-15 stays gated on a real testnet write/query/retrieve.
+validated record is written. The POC is not wired into Studio; Studio implements
+its own browser path over the same contract (below).
+
+### Studio Arkiv history
+
+`apps/studio/src/arkiv` promotes the POC into a Studio product feature once a real
+write/query/retrieve run existed (`poc-write-001`, verified in
+[arkiv-poc.md](arkiv-poc.md)). Boundaries:
+
+- `gateway.ts` is the only module in Studio that imports `@arkiv-network/sdk`.
+  Everything else depends on the small `ArkivGateway` interface (find, publish,
+  read, query, current block), which is what tests substitute.
+- `@blocklab/arkiv-metadata` stays the single record contract: the browser writes
+  canonical payload bytes produced by `metadataToPayloadBytes`, and an entity that
+  does not re-validate (or does not round-trip byte-for-byte) is rejected as
+  malformed. No field is ever substituted for a missing one.
+- `schema.ts` mirrors the POC's `defineSchema("blocklab.experiment")`; the
+  discovery attributes are exactly `DISCOVERY_ATTRIBUTES` (experimentId,
+  experimentType, scenarioName, status, targetChainId, startedAtMs). Only the
+  compact record is published; traces and evidence stay local.
+- `wallet.ts` is the EIP-1193 adapter: connect, read chain, an explicit
+  `wallet_switchEthereumChain` with a `4902` add-chain fallback that carries no
+  access key, and event attachment with removable handlers. Studio never switches
+  networks on its own.
+- `controller.ts` orchestrates publish/history/detail with a generation counter:
+  preflight → exactly one `createEntity` → wait for the mined receipt → read back
+  and compare bytes. A failed preflight blocks signing; an uncertain write is
+  re-queried once and reported with "nothing was re-signed" — never retried and
+  never given a fabricated hash or key.
+- `state.ts` is the pure reducer (wallet/publish/history/detail), `view.ts` the
+  pure view model, `compare.ts` the metadata field diff, and `dom.ts` the only
+  DOM-touching module. `compare.ts` is not a second RPC comparison engine;
+  `comparison/` remains the only measurement engine.
+- `VITE_ARKIV_ACCESS_KEY` enables reads/writes. Without it no gateway is built
+  and every gateway-dependent action reports "Gateway is not ready." — an honest
+  failure, not a silent fallback.
+
+The Node.js side is untouched: `apps/cli`, `@blocklab/runner`, `@blocklab/core`
+and `@blocklab/evidence` import neither Studio nor `@blocklab/browser-rpc`, so
+the CLI stays free of the browser harness and the Arkiv SDK.
 
 ## Experiment data flow
 

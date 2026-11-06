@@ -318,6 +318,48 @@ mined, the entity reads back, every payload field matches, actual gas was
 
 **Exit gate:** Users can save, query, retrieve, and safely replay an Arkiv-backed experiment definition.
 
+**Status (2026-11-06): implemented in Studio; replay stays validated-only.**
+
+1. **DONE** — the compact schema already existed in `@blocklab/arkiv-metadata`
+   (schema `1.0`, closed allowlist); Studio reuses it as the only contract and
+   writes canonical `metadataToPayloadBytes`.
+2. **DONE** — result counts, `rpcFailureCount`, latency summary and
+   `evidenceDigest` are part of the record; the digest is documented as a hash of
+   local evidence, not a trust claim.
+3. **DONE** — `expiryDays` is explicit (POC record: 7 days; the real entity's
+   `expiresAt` block is recorded in docs/arkiv-poc.md). `MAX_LIFETIME_DAYS` caps
+   it at 180.
+4. **DONE** — Studio connects via EIP-1193, displays the account, detects the
+   Rabdi chain id (`0x76edaf`) and refuses to publish on another chain; the
+   wallet switch happens only on an explicit click, with no access key in the
+   added chain config.
+5. **DONE** — exactly one `createEntity` per approval: duplicate preflight before
+   signing, confirmation only after a mined receipt, read-back byte comparison,
+   distinct user-rejection/network/validation/unknown errors, and an uncertain
+   outcome reported without re-signing.
+6. **PARTIAL** — Studio queries the indexed `experimentId`, `scenarioName` and
+   `status`. "Owner" is displayed on the record but is not a search field (the
+   SDK filters supported by this schema are the indexed attributes).
+7. **DONE for validation, not replay** — retrieved payloads are re-validated and
+   must round-trip canonically before display; a record that fails is reported as
+   malformed. Studio does not execute an experiment from a retrieved definition
+   (that would need the runner and a local-agent boundary), so this item is
+   recorded as validated retrieval rather than execution.
+8. **DONE** — loading, empty (genuine zero results), failed, missing/expired,
+   malformed, wrong-network and wallet-rejection states are separate and tested.
+9. **DONE** — only the compact record is published; traces and evidence files stay
+   local (enforced by the schema allowlist, the disclosure preview, and the
+   credential-shape pre-sign check).
+10. **DONE** — README, architecture, Studio docs, plan/backlog and
+    docs/arkiv-poc.md describe the feature with its verified scope; ARK-05
+    (two-wallet ownership) and ARK-06 (observed expiry) remain PARTIAL and are
+    not claimed.
+
+Verification for this phase: 313 tests / 33 files, lint/typecheck/build clean, and
+a real headless-Chrome run (`scripts/studio-arkiv-check.mjs`, 20/20 checks) with a
+labelled mock wallet. That browser run verifies wiring and gating only; the real
+publication claim still rests solely on the verified `poc-write-001` receipt.
+
 ## Phase 16 — ENSv2 conditional gate
 
 1. Recheck current official prize requirements.

@@ -19,7 +19,7 @@ BLOCKLAB is planned as a TypeScript/JavaScript pnpm workspace monorepo with a sh
 ## Planned integrations
 
 - Ethereum Foundation Anon-RPC — browser integration implemented (see below)
-- Arkiv — Rabdi testnet proof of concept built; a real entity write is still blocked (see below)
+- Arkiv — Rabdi testnet proof of concept with one verified real entity write, plus a Studio history feature (see below)
 - ENSv2 is conditional and will be included only if its real, central workflow is validated within the project timeline.
 
 ## Project status
@@ -28,11 +28,12 @@ The local inspector, loopback RPC proxy, deterministic `rpc-blackout`
 experiment, evidence evaluator, replay/comparison APIs, and first-class CLI are
 implemented. The Anon-RPC browser integration is implemented in
 `@blocklab/browser-rpc` and used by `apps/sample-dapp` and `apps/anon-rpc-poc`.
-The Arkiv proof of concept lives in `apps/arkiv-poc` and is verified read-only on
-the Rabdi testnet; its real entity write is still blocked, and no write is
-claimed. ENSv2, automatic failover, and hosted services remain out of scope for
-the current local workflow. Anon-RPC is browser-only: the CLI never imports or
-emulates the harness.
+The Arkiv proof of concept lives in `apps/arkiv-poc` and has one verified real
+entity publication (tx, entity key, receipt and read-back in `docs/arkiv-poc.md`)
+plus a Studio history feature over the same contract. ENSv2, automatic failover,
+and hosted services remain out of scope for the current local workflow. Anon-RPC
+is browser-only: the CLI never imports or emulates the harness, and neither does
+it import the Arkiv SDK.
 
 ## Anon-RPC browser routes
 
@@ -105,36 +106,77 @@ IPs, observer views, or traffic analysis. Details and limitations:
 
 `apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It
 uses the verified `@arkiv-network/sdk@1.0.1` and `viem` against the Rabdi testnet
-(chain id `7794095` = `0x76edaf`, 2 s blocks, `tGLM`), and writes one compact
+(chain id `7794095` = `0x76edaf`, 2 s blocks, `tGLM`, explorer
+`https://rabdi.explorer.arkiv.network`), and writes one compact
 `blocklab.experiment` entity through a connected EIP-1193 wallet. The record
 contract lives in `@blocklab/arkiv-metadata` (dependency-free): a schema-versioned
 allowlist with six indexed discovery attributes and one non-indexed payload
-attribute. Detailed evidence stays local.
+attribute. Detailed evidence stays local; only the compact, validated, redacted
+record is ever written.
 
 Publishing is gated: valid record, connected wallet, chain id exactly `0x76edaf`,
 an explicit confirmation checkbox, and a completed duplicate preflight. A wrong
 network disables publish instead of switching silently, a rejected signature
-leaves nothing behind, and signing never leaves the wallet.
+leaves nothing behind, signing never leaves the wallet, and no private key is
+ever pasted or stored.
 
 What is verified:
 
-- Read-only JSON-RPC check (`scripts/arkiv-net-check.mjs`): 11/11 live checks —
-  chain id, head block, 2 s block timing, schema-tagged query (8 `posts`
-  entities), owner/creator/expiresAt fields, `getEntity` hit and miss, no
-  transaction sent.
-- Browser POC check (`scripts/arkiv-poc-check.mjs`): a live read-only probe
-  (chain `7794095`, block `265399`, tag `blocklab.experiment`) with publish
-  disabled and zero writes; wrong-network gating with a mock wallet; and the
-  user-rejection path up to exactly one rejected `eth_sendTransaction`, leaving no
-  entity key and no transaction hash.
+- Read-only JSON-RPC check (`scripts/arkiv-net-check.mjs`): 11/11 live checks
+  (chain id, head block, 2 s block timing, schema-tagged query, ownership fields,
+  `getEntity` hit/miss, no transaction sent).
+- Browser POC check (`scripts/arkiv-poc-check.mjs`): live read-only probe plus
+  wrong-network gating and the mock-wallet user-rejection path up to exactly one
+  rejected `eth_sendTransaction`.
+- **One real publication, verified end to end (2026-11-06, `poc-write-001`)**:
+  exactly one `createEntity` — tx
+  `0xed989cbe6d5b0aad7db1d03e0d7e16ff6865fb6f5a915d08c08f7bfa3c573f05` (block
+  `269199`), entity
+  `0x1d7b6bf841deab1a003cc7c1fa407b97e7e27fb6de276dc287b8e2e0551bb31a`, actual gas
+  `0.000209105 tGLM`, signer `0x8C58af332c90B90bfcD2D5021F7Ff6e7880B8759` (rotated
+  after an exposure report; the key exists only in git-ignored
+  `apps/arkiv-poc/.env.local`). The entity reads back with
+  `owner == creator ==` the signer, `expiresAt` block `571599` (7 days), and a
+  payload byte-identical to the canonical record. Full evidence:
+  [docs/arkiv-poc.md](docs/arkiv-poc.md).
 
-What is **not** claimed: no real entity write, transaction hash, entity key or
-explorer link exists yet. The testnet faucet needs a connected browser wallet, the
-harness signer holds `0 tGLM`, and the anonymous `arkiv_query` budget on the public
-endpoint is exhausted (HTTP 429 `ANON_COST_LIMITED`), so an access key is required
-for repeated live reads. Ownership/creator and expiry behaviour are therefore not
-verified experimentally. Full evidence and blockers:
-[docs/arkiv-poc.md](docs/arkiv-poc.md).
+What is **not** claimed: no two-wallet ownership experiment (ARK-05 PARTIAL), no
+observed entity expiry (ARK-06 PARTIAL — the `expiresAt` block is recorded but
+nothing was watched die), and no browser-wallet end-to-end write (ARK-07 PARTIAL —
+the real write was driven by the harness signer). These stay experiments, not
+claims.
+
+## Studio Arkiv history
+
+`apps/studio/src/arkiv` (Phase 15) makes Arkiv an actual Studio feature: a
+wallet panel (connect, chain detection, explicit switch to `0x76edaf`, no silent
+network switching), a publish flow (paste a validated record, review the
+disclosure preview, exactly one wallet-signed `createEntity` after a duplicate
+preflight, confirmation only after a mined receipt, byte-level read-back), a
+history search over the indexed `experimentId` / `scenarioName` / `status`
+attributes, record details (owner/creator/entity key/expiry blocks with the
+digest disclaimer), and a metadata comparison that reuses the shared
+`@blocklab/arkiv-metadata` contract — `apps/studio/src/comparison` stays the only
+measurement engine.
+
+The Arkiv SDK is imported by a single browser module
+(`apps/studio/src/arkiv/gateway.ts`); the Node.js side (`cli`, `runner`, `core`,
+`evidence`) stays free of it, exactly like the Anon-RPC harness rule. The access
+key (`VITE_ARKIV_ACCESS_KEY`) is never rendered and never added to the wallet's
+chain configuration. Without a key the panel is display-only and every
+gateway-dependent action fails honestly with "Gateway is not ready." — never a
+silent fallback.
+
+Verified by unit tests plus a real headless-Chrome run with a labelled mock
+wallet (`isBlocklabMockWallet`, always `4001` on `eth_sendTransaction`), which
+asserts the gating and honest failure states across 20 checks:
+
+```bash
+node scripts/studio-arkiv-check.mjs --url http://localhost:5178/ --port 9552
+```
+
+That run verifies wiring and gating, not a real publication; the only real
+publication claim remains the verified `poc-write-001` entity above.
 
 ## Package manager
 

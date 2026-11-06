@@ -113,3 +113,72 @@ checks are scripted in `scripts/studio-view-check.mjs` (rendered panel) and
 comparison, clicks Export JSON, reads the file Chrome wrote, compares it with the
 rendered table, and asserts that zero network requests were made during the
 export.
+
+## Arkiv experiment history (added in Phase 15)
+
+`src/arkiv/` adds wallet-mediated publish, history search, record details and
+record comparison to Studio. The comparison panel stays **read-only**; the Arkiv
+panel adds exactly one write path (Publish), and only from an explicit click.
+
+### Boundaries (unchanged core rules)
+
+- `@arkiv-network/sdk` is imported by exactly one module, `src/arkiv/gateway.ts`.
+  Everything else talks to the `ArkivGateway` interface.
+- `@blocklab/arkiv-metadata` is the only record contract: every payload written
+  or read is validated against it and encoded canonically
+  (`metadataToPayloadBytes`). A read that fails validation is reported as
+  malformed and is never rendered as fact.
+- Studio never reads a private key. Signing happens in the wallet
+  (`eth_sendTransaction`); Studio calls only `eth_requestAccounts`,
+  `eth_chainId`, `eth_accounts`, and the explicit wallet switch.
+- The Arkiv access key (`VITE_ARKIV_ACCESS_KEY`) is never rendered, logged, or
+  written into the wallet's chain configuration (`wallet_addEthereumChain`
+  carries the public RPC URL only).
+- `apps/cli`, `@blocklab/runner`, `@blocklab/core` and `@blocklab/evidence`
+  never import anything from `apps/studio` or `@blocklab/browser-rpc`'s Arkiv
+  surface; Studio remains browser-only.
+
+### Publish
+
+1. Paste a validated BLOCKLAB record (JSON). It is re-validated by the shared
+   schema and its canonical payload bytes are precomputed in the browser.
+2. A disclosure list shows exactly what becomes public (indexed fields, counts,
+   latency summary, digest, lifetime) with the honest note that the digest does
+   not by itself prove trustworthy execution.
+3. The **Review & approve** action first runs a duplicate preflight
+   (`findExperiment`), then sends exactly one `createEntity`. If the preflight
+   cannot run, the write is refused (an unknown duplicate state is never treated
+   as "no duplicate").
+4. Confirmation is only shown after a mined receipt. The read-back step fetches
+   the entity and compares its payload bytes to the submitted canonical bytes;
+   `verified` / `mismatch` / `unavailable` are all shown honestly.
+5. If the write outcome is uncertain, the controller re-queries for the entity
+   and, if one exists, reports it with "nothing was re-signed" — it never retries
+   blindly and never invents a transaction hash or entity key.
+
+### History, details and compare
+
+- Search uses the indexed `DISCOVERY_ATTRIBUTES`: `experimentId`, `scenarioName`,
+  `status`. A genuine empty result is a distinct state from a failed query.
+- Details render every allowlisted field plus system metadata (owner, creator,
+  entity key, created/updated/expiry blocks) and the digest disclaimer. Missing,
+  expired (SDK `NoEntityFoundError`), malformed and unreadable records have
+  distinct, honest states.
+- `compareRecords` reuses the shared metadata contract field by field. It is not
+  a second RPC comparison engine — `src/comparison/` remains the only per-method
+  measurement engine. Local (pasted) records are always labelled "Local record".
+
+### Verification
+
+- Unit tests in `src/arkiv/*.test.ts` cover the reducer, wallet adapter
+  (fake EIP-1193 provider), record decode/validation/redaction, gateway
+  mapping, controller flows (duplicate, rejection, uncertainty, races), and the
+  DOM wiring with the same fake-element convention as the comparison tests.
+- Real-browser wiring checks: `scripts/studio-arkiv-check.mjs` drives the built
+  app in headless Chrome with a labelled mock wallet (`isBlocklabMockWallet`,
+  always 4001 on `eth_sendTransaction`) and asserts the gating throughout — it
+  never claims a publication. Real publication remains the POC harness's
+  verified result (`poc-write-001`).
+- Configuration: `VITE_ARKIV_ACCESS_KEY` enables the read/write gateway. Without
+  it the panel is display-only and every gateway-dependent action reports
+  "Gateway is not ready." — no silent fallback.

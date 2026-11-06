@@ -137,14 +137,14 @@ deliberate specifier/chain mismatch failed loudly with no fallback. `nym` and
 |---|---|---|---|---|---|
 | ARK-01 | P1 | Add Arkiv POC fixture | CLI-09 | `@arkiv-network/sdk@1.0.1` and Viem are used with Rabdi | DONE |
 | ARK-02 | P1 | Configure access and signer safely | ARK-01 | No private key is in source; signer is testnet-only/connected | DONE |
-| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | BLOCKED (awaiting faucet) |
+| ARK-03 | P1 | Write compact experiment entity | ARK-02 | Real entity write returns verifiable transaction/entity data | DONE (2026-11-06; see notes) |
 | ARK-04 | P1 | Query and retrieve entity | ARK-03 | Indexed scenario/status query returns expected payload | DONE |
 | ARK-05 | P1 | Verify owner and creator semantics | ARK-04 | Live result records observed ownership behavior | PARTIAL |
-| ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | NOT-VERIFIED |
-| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL |
-| ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | TODO |
-| ARK-09 | P1 | Implement validated local replay | ARK-08; CLI-05 | Retrieved definitions are validated before local execution | TODO |
-| ARK-10 | P1 | Complete evidence documentation | ARK-09 | Schema, friction, reach, rationale, and usage docs contain real evidence | TODO |
+| ARK-06 | P1 | Verify expiry | ARK-04 | Expiry configuration and observed behavior are documented | PARTIAL (expiresAt recorded; no observed expiry) |
+| ARK-07 | P1 | Implement connected-wallet Studio write | ARK-06 | User signs without pasting a private key | PARTIAL (browser path verified to wallet rejection; real write is the harness-run `poc-write-001`) |
+| ARK-08 | P1 | Implement Arkiv history query/retrieve | ARK-07 | Studio displays loading, empty, error, expired, and success states | PARTIAL (implemented in Studio; empty/expired states unit-tested, live-queried only through the POC harness) |
+| ARK-09 | P1 | Implement validated local replay | ARK-08; CLI-05 | Retrieved definitions are validated before local execution | PARTIAL (retrieval + canonical revalidation DONE; execution in Studio is deliberately out of scope) |
+| ARK-10 | P1 | Complete evidence documentation | ARK-09 | Schema, friction, reach, rationale, and usage docs contain real evidence | DONE (architecture, Studio README, arkiv-poc.md, plan/backlog) |
 
 Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 
@@ -164,6 +164,16 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 - **ARK-06 PARTIAL**: the published entity reports `expiresAt` block `571599` (7 days from creation, matching `expiryDays`); no observation of an entity actually expiring.
 - **ARK-07 PARTIAL**: user-signs-without-pasting-key is proven up to the rejection in a headless browser; the real write was driven by the harness signer, not a browser wallet end to end.
 - **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
+- **Phase 15 Studio integration (2026-11-06)**: `apps/studio/src/arkiv/` adds
+  wallet connect/chain detection, gated publish with duplicate preflight and
+  byte-level read-back, history search over the indexed attributes, record
+  details, and a metadata comparison that reuses the shared contract. Verified by
+  313 unit tests / 33 files plus `scripts/studio-arkiv-check.mjs` (20/20
+  headless-Chrome checks with a labelled mock wallet). The browser run proves
+  wiring and gating only and never claims a publication; the only real
+  publication claim remains the verified `poc-write-001` entity. ARK-05 (two-wallet
+  ownership), ARK-06 (observed expiry) and ARK-07 (browser-wallet end-to-end write)
+  stay PARTIAL and are explicitly not claimed.
 
 ## ENSv2 conditional
 
@@ -184,8 +194,8 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
 | UI-03 | P0 | Build experiment preflight | RUN-07; UI-01 | Target, fault, scope, and safety are explicit | TODO |
 | UI-04 | P0 | Build actual event timeline | RUN-01; UI-03 | Timeline is driven by runner events, not animation | TODO |
 | UI-05 | P0 | Build result/replay/compare view | RUN-10; UI-04 | Metrics, status, evidence, replay, and comparison are usable | TODO |
-| UI-06 | P1 | Add Arkiv history view | ARK-08; UI-01 | Records are read from Arkiv, not mocked | TODO |
-| UI-07 | P1 | Add Anon-RPC comparison view | ANON-08; UI-01 | Browser measurements and exclusions are visible | TODO |
+| UI-06 | P1 | Add Arkiv history view | ARK-08; UI-01 | Records are read from Arkiv, not mocked | PARTIAL (Studio history panel implemented; live reads exercised by the verified POC entity, mock-limited in browser checks) |
+| UI-07 | P1 | Add Anon-RPC comparison view | ANON-08; UI-01 | Browser measurements and exclusions are visible | DONE (Phase 13, comparison panel; exported via studio-view-check/export-check) |
 | SAFE-01 | P0 | Test redaction and local evidence | RUN-09 | Secrets, cookies, wallet identifiers, and raw payloads are absent | TODO |
 | SAFE-02 | P0 | Test cleanup and cancellation | RUN-02; DEMO-05 | No orphaned process/proxy remains | TODO |
 | SAFE-03 | P0 | Security review trust boundaries | SAFE-01; SAFE-02 | High-impact findings are fixed or explicitly documented | TODO |
