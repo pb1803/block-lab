@@ -5,11 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   compareEvidence,
   createRpcBlackoutEvidence,
+  createRpcLatencyEvidence,
   EVIDENCE_SCHEMA_VERSION,
   type EvidenceObservation,
   EvidenceValidationError,
   evaluateRpcBlackout,
+  evaluateRpcLatency,
   listEvidence,
+  normalizeLatencyProxyEvidence,
   normalizeProxyEvidence,
   type RpcBlackoutEvidence,
   readEvidence,
@@ -21,6 +24,12 @@ import {
 
 const startedAt = "2026-01-01T00:00:00.000Z";
 const schedule = {
+  startOffsetMs: 100,
+  durationMs: 100,
+  experimentDurationMs: 400,
+};
+const latencySchedule = {
+  delayMs: 50,
   startOffsetMs: 100,
   durationMs: 100,
   experimentDurationMs: 400,
@@ -143,6 +152,90 @@ describe("rpc-blackout evaluation and metrics", () => {
       injectedBlackoutFailures: 1,
       recoverySuccessCount: 1,
       recoveryLatencyMs: 0,
+    });
+
+    describe("rpc-latency evaluation and metrics", () => {
+      it("classifies request-start boundaries and measures injected latency", () => {
+        const records = [
+          {
+            ...record(0, "forwarded_success", "baseline"),
+            latencyMs: 5,
+            requestTimestamp: new Date(Date.parse(startedAt)).toISOString(),
+          },
+          {
+            ...record(150, "forwarded_success", "fault", true),
+            latencyMs: 55,
+            injectedDelayMs: 50,
+            requestTimestamp: new Date(
+              Date.parse(startedAt) + 100,
+            ).toISOString(),
+          },
+          {
+            ...record(250, "forwarded_success", "recovery"),
+            latencyMs: 6,
+            requestTimestamp: new Date(
+              Date.parse(startedAt) + 200,
+            ).toISOString(),
+          },
+        ];
+        const observations = normalizeLatencyProxyEvidence(
+          records,
+          startedAt,
+          latencySchedule,
+        );
+        expect(observations.map((observation) => observation.phase)).toEqual([
+          "baseline",
+          "fault",
+          "recovery",
+        ]);
+        const evidence = createRpcLatencyEvidence(
+          {
+            executionId: "latency-execution",
+            state: "completed",
+            startedAt,
+            finishedAt: "2026-01-01T00:00:01.000Z",
+          },
+          latencySchedule,
+          records,
+        );
+        expect(evidence.evaluation.status).toBe("passed");
+        expect(evidence.evaluation.metrics).toMatchObject({
+          injectedRequestCount: 1,
+          baselineAverageLatencyMs: 5,
+          faultAverageLatencyMs: 55,
+          recoveryAverageLatencyMs: 6,
+          observedAdditionalLatencyMs: 50,
+        });
+      });
+
+      it("remains inconclusive when configured latency is not observed", () => {
+        const evaluation = evaluateRpcLatency(
+          normalizeLatencyProxyEvidence(
+            [
+              {
+                ...record(0, "forwarded_success", "baseline"),
+                latencyMs: 10,
+              },
+              {
+                ...record(100, "forwarded_success", "fault", true),
+                latencyMs: 10,
+              },
+              {
+                ...record(200, "forwarded_success", "recovery"),
+                latencyMs: 10,
+              },
+            ],
+            startedAt,
+            latencySchedule,
+          ),
+          startedAt,
+          latencySchedule,
+        );
+        expect(evaluation.status).toBe("inconclusive");
+        expect(evaluation.fault.reasons).toContain(
+          "configured_delay_not_observed",
+        );
+      });
     });
   });
 

@@ -24,9 +24,9 @@ BLOCKLAB is planned as a TypeScript/JavaScript pnpm workspace monorepo with a sh
 
 ## Project status
 
-The local inspector, loopback RPC proxy, deterministic `rpc-blackout`
-experiment, evidence evaluator, replay/comparison APIs, and first-class CLI are
-implemented. The Anon-RPC browser integration is implemented in
+The local inspector, loopback RPC proxy, deterministic `rpc-blackout` and
+`rpc-latency` experiments, evidence evaluator, replay/comparison APIs, and
+first-class CLI are implemented. The Anon-RPC browser integration is implemented in
 `@blocklab/browser-rpc` and used by `apps/sample-dapp` and `apps/anon-rpc-poc`.
 The Arkiv proof of concept lives in `apps/arkiv-poc` and has one verified real
 entity publication (tx, entity key, receipt and read-back in `docs/arkiv-poc.md`)
@@ -255,6 +255,20 @@ node apps/cli/dist/index.js replay <execution-id> `
   --upstream http://127.0.0.1:8545
 node apps/cli/dist/index.js compare <execution-a> <execution-b>
 ```
+
+Run deterministic RPC latency injection with a fixed delay. Requests starting
+in `[start-offset, start-offset + duration)` wait exactly `--delay`
+milliseconds:
+
+```powershell
+node apps/cli/dist/index.js test rpc-latency `
+  --upstream http://127.0.0.1:8545 `
+  --delay 250 --start-offset 100 --duration 500 --experiment-duration 800
+```
+
+Latency evidence measures proxy-observed request behavior and does not prove
+application-level resilience. All experiments remain read-only and loopback
+only.
 
 Evidence is stored outside the inspected project by default. Use
 `--evidence-dir <path>` or `BLOCKLAB_EVIDENCE_DIR` to override it. On Windows

@@ -207,4 +207,44 @@ describe("blocklab CLI", () => {
     ).toBe(EXIT_CODES.operation);
     expect(unsafe.stderr.join("")).toContain("loopback");
   });
+
+  it("runs rpc-latency with explicit delay configuration and persists latency evidence", async () => {
+    directory = await mkdtemp(join(tmpdir(), "blocklab-cli-latency-"));
+    upstream = await listenUpstream();
+    const result = capture();
+    expect(
+      await runCli(
+        [
+          "test",
+          "rpc-latency",
+          "--upstream",
+          upstream.url,
+          "--delay",
+          "80",
+          "--start-offset",
+          "20",
+          "--duration",
+          "60",
+          "--experiment-duration",
+          "120",
+          "--timeout",
+          "2000",
+          "--evidence-dir",
+          directory,
+          "--json",
+        ],
+        result.dependencies,
+      ),
+    ).toBe(EXIT_CODES.success);
+    const evidence = JSON.parse(result.stdout.join("")) as {
+      readonly scenarioId: string;
+      readonly configuration: { readonly delayMs: number };
+      readonly evaluation: {
+        readonly metrics: { readonly injectedRequestCount: number };
+      };
+    };
+    expect(evidence.scenarioId).toBe("rpc-latency");
+    expect(evidence.configuration.delayMs).toBe(80);
+    expect(evidence.evaluation.metrics.injectedRequestCount).toBe(1);
+  });
 });

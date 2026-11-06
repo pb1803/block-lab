@@ -7,6 +7,7 @@ import {
   InvalidTransitionError,
   PreflightError,
   preflightExecution,
+  preflightRpcProxy,
   startExecution,
 } from "./index.js";
 
@@ -191,6 +192,21 @@ describe("runner preflight", () => {
         },
       }),
     ).toThrow(/not enabled/);
+  });
+
+  it("rejects invalid latency schedules and accepts a bounded loopback schedule", () => {
+    expect(() =>
+      preflightRpcProxy({
+        upstreamUrl: "http://127.0.0.1:8545",
+        latency: { delayMs: 0, startOffsetMs: 0, durationMs: 10 },
+      }),
+    ).toThrow(PreflightError);
+    expect(() =>
+      preflightRpcProxy({
+        upstreamUrl: "http://127.0.0.1:8545",
+        latency: { delayMs: 25, startOffsetMs: 10, durationMs: 20 },
+      }),
+    ).not.toThrow();
   });
 
   it("rejects cleanup registration after cleanup begins", async () => {

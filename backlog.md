@@ -91,6 +91,17 @@
 | CLI-08 | P0 | Add help and stable exit codes | CLI-01; CLI-04 | Invalid input and run failures are actionable | DONE |
 | CLI-09 | P0 | Verify local-only operation | CLI-04 | Core workflow runs without Studio or hosted account | DONE |
 
+## ATTACK-01 deterministic RPC latency
+
+| ID | Priority | Task | Dependencies | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| ATTACK-01 | P0 | Implement deterministic `rpc-latency` injection | RUN-04; RUN-08; CLI-04 | Fixed delay applies only inside an explicit half-open interval, is cancellable, evidenced, evaluated, replayable, and CLI-accessible | DONE |
+
+The latency scenario uses the existing loopback proxy and lifecycle runner. It
+does not execute project scripts, add jitter, support signing or transactions,
+or claim application-level resilience. Evidence records proxy-observed
+baseline, fault, and recovery timing only.
+
 ## Anon-RPC primary integration
 
 | ID | Priority | Task | Dependencies | Acceptance criteria | Status |

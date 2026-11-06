@@ -12,6 +12,7 @@ import type { ExperimentResult } from "@blocklab/core";
 
 export const EVIDENCE_SCHEMA_VERSION = "1.0" as const;
 export const RPC_BLACKOUT_SCENARIO_VERSION = "1.0.0" as const;
+export const RPC_LATENCY_SCENARIO_VERSION = "1.0.0" as const;
 
 export type EvidencePhase = "baseline" | "fault" | "recovery";
 export type EvaluationStatus = "passed" | "failed" | "inconclusive";
@@ -42,6 +43,13 @@ export interface BlackoutSchedule {
   readonly experimentDurationMs?: number;
 }
 
+export interface LatencySchedule {
+  readonly delayMs: number;
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
 export interface EvidenceObservation {
   readonly phase: EvidencePhase;
   readonly timestamp: string;
@@ -51,6 +59,8 @@ export interface EvidenceObservation {
   readonly latencyMs: number;
   readonly errorCategory?: string;
   readonly correlationId: string;
+  readonly requestTimestamp?: string;
+  readonly injectedDelayMs?: number;
 }
 
 export interface EvidenceMetrics {
@@ -64,6 +74,11 @@ export interface EvidenceMetrics {
   readonly medianLatencyMs?: number;
   readonly recoverySuccessCount: number;
   readonly recoveryLatencyMs?: number;
+  readonly baselineAverageLatencyMs?: number;
+  readonly faultAverageLatencyMs?: number;
+  readonly recoveryAverageLatencyMs?: number;
+  readonly injectedRequestCount: number;
+  readonly observedAdditionalLatencyMs?: number;
 }
 
 export interface PhaseEvaluation {
@@ -100,6 +115,25 @@ export interface RpcBlackoutEvidence {
   readonly limitations: readonly string[];
 }
 
+export interface RpcLatencyEvidence {
+  readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
+  readonly recordId: string;
+  readonly executionId: string;
+  readonly scenarioId: "rpc-latency";
+  readonly scenarioVersion: typeof RPC_LATENCY_SCENARIO_VERSION;
+  readonly configuration: LatencySchedule;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly terminalState: TerminalState;
+  readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
+  readonly evaluation: ExperimentEvaluation;
+  readonly warnings: readonly string[];
+  readonly limitations: readonly string[];
+}
+
+export type EvidenceRecord = RpcBlackoutEvidence | RpcLatencyEvidence;
+
 export interface ProxyEvidenceLike {
   readonly executionId: string;
   readonly scenarioId: string;
@@ -110,6 +144,8 @@ export interface ProxyEvidenceLike {
   readonly latencyMs: number;
   readonly correlationId: string;
   readonly errorCategory?: string;
+  readonly requestTimestamp?: string;
+  readonly injectedDelayMs?: number;
 }
 
 export interface EvidenceExecutionLike {
@@ -204,6 +240,44 @@ function assertSchedule(
   }
 }
 
+function assertLatencySchedule(
+  schedule: unknown,
+): asserts schedule is LatencySchedule {
+  if (!isObject(schedule)) {
+    throw new EvidenceValidationError("Latency configuration is required.");
+  }
+  const delayMs = schedule.delayMs;
+  const startOffsetMs = schedule.startOffsetMs;
+  const durationMs = schedule.durationMs;
+  const experimentDurationMs = schedule.experimentDurationMs;
+  if (
+    typeof delayMs !== "number" ||
+    !Number.isInteger(delayMs) ||
+    delayMs <= 0 ||
+    typeof startOffsetMs !== "number" ||
+    !Number.isInteger(startOffsetMs) ||
+    startOffsetMs < 0 ||
+    typeof durationMs !== "number" ||
+    !Number.isInteger(durationMs) ||
+    durationMs <= 0
+  ) {
+    throw new EvidenceValidationError(
+      "Latency delay and duration must be positive integers; start offset must be non-negative.",
+    );
+  }
+  if (
+    experimentDurationMs !== undefined &&
+    (typeof experimentDurationMs !== "number" ||
+      !Number.isInteger(experimentDurationMs) ||
+      experimentDurationMs <= 0 ||
+      startOffsetMs + durationMs > experimentDurationMs)
+  ) {
+    throw new EvidenceValidationError(
+      "Latency fault window must fit within the experiment duration.",
+    );
+  }
+}
+
 function assertObservation(
   value: unknown,
   index: number,
@@ -214,6 +288,11 @@ function assertObservation(
     );
   }
   assertTimestamp(value.timestamp, `Observation ${index} timestamp`);
+  if (value.requestTimestamp !== undefined)
+    assertTimestamp(
+      value.requestTimestamp,
+      `Observation ${index} request timestamp`,
+    );
   if (
     typeof value.phase !== "string" ||
     !["baseline", "fault", "recovery"].includes(value.phase) ||
@@ -229,11 +308,21 @@ function assertObservation(
   ) {
     throw new EvidenceValidationError(`Observation ${index} is invalid.`);
   }
+  if (
+    value.injectedDelayMs !== undefined &&
+    (typeof value.injectedDelayMs !== "number" ||
+      !Number.isFinite(value.injectedDelayMs) ||
+      value.injectedDelayMs < 0)
+  ) {
+    throw new EvidenceValidationError(
+      `Observation ${index} injected delay is invalid.`,
+    );
+  }
 }
 
 export function validateEvidence(
   value: unknown,
-): asserts value is RpcBlackoutEvidence {
+): asserts value is EvidenceRecord {
   if (!isObject(value)) {
     throw new EvidenceValidationError("Evidence record must be an object.");
   }
@@ -245,14 +334,19 @@ export function validateEvidence(
   if (
     typeof value.recordId !== "string" ||
     typeof value.executionId !== "string" ||
-    value.scenarioId !== "rpc-blackout" ||
-    value.scenarioVersion !== RPC_BLACKOUT_SCENARIO_VERSION
+    !(
+      (value.scenarioId === "rpc-blackout" &&
+        value.scenarioVersion === RPC_BLACKOUT_SCENARIO_VERSION) ||
+      (value.scenarioId === "rpc-latency" &&
+        value.scenarioVersion === RPC_LATENCY_SCENARIO_VERSION)
+    )
   ) {
     throw new EvidenceValidationError(
       "Unsupported or incomplete scenario identity.",
     );
   }
-  assertSchedule(value.configuration);
+  if (value.scenarioId === "rpc-blackout") assertSchedule(value.configuration);
+  else assertLatencySchedule(value.configuration);
   assertTimestamp(value.startedAt, "startedAt");
   assertTimestamp(value.finishedAt, "finishedAt");
   if (Date.parse(value.finishedAt) < Date.parse(value.startedAt)) {
@@ -309,8 +403,15 @@ export function normalizeProxyEvidence(
   assertSchedule(schedule);
   return records
     .map((record) => ({
-      phase: classifyObservation(record.timestamp, startedAt, schedule),
+      phase: classifyObservation(
+        record.requestTimestamp ?? record.timestamp,
+        startedAt,
+        schedule,
+      ),
       timestamp: record.timestamp,
+      ...(record.requestTimestamp === undefined
+        ? {}
+        : { requestTimestamp: record.requestTimestamp }),
       method: record.method,
       outcome: record.outcome,
       injected: record.injected,
@@ -319,6 +420,46 @@ export function normalizeProxyEvidence(
         ? {}
         : { errorCategory: record.errorCategory }),
       correlationId: record.correlationId,
+      ...(record.injectedDelayMs === undefined
+        ? {}
+        : { injectedDelayMs: record.injectedDelayMs }),
+    }))
+    .sort(
+      (left, right) =>
+        Date.parse(left.timestamp) - Date.parse(right.timestamp) ||
+        left.correlationId.localeCompare(right.correlationId),
+    );
+}
+
+export function normalizeLatencyProxyEvidence(
+  records: readonly ProxyEvidenceLike[],
+  startedAt: string,
+  schedule: LatencySchedule,
+): readonly EvidenceObservation[] {
+  assertTimestamp(startedAt, "startedAt");
+  assertLatencySchedule(schedule);
+  return records
+    .map((record) => ({
+      phase: classifyObservation(
+        record.requestTimestamp ?? record.timestamp,
+        startedAt,
+        schedule,
+      ),
+      timestamp: record.timestamp,
+      ...(record.requestTimestamp === undefined
+        ? {}
+        : { requestTimestamp: record.requestTimestamp }),
+      method: record.method,
+      outcome: record.outcome,
+      injected: record.injected,
+      latencyMs: record.latencyMs,
+      ...(record.errorCategory === undefined
+        ? {}
+        : { errorCategory: record.errorCategory }),
+      correlationId: record.correlationId,
+      ...(record.injectedDelayMs === undefined
+        ? {}
+        : { injectedDelayMs: record.injectedDelayMs }),
     }))
     .sort(
       (left, right) =>
@@ -385,6 +526,30 @@ export function calculateMetrics(
   const firstRecovery = recoverySuccess[0];
   const averageLatencyMs = average(latencies);
   const medianLatencyMs = median(latencies);
+  const baselineAverageLatencyMs = average(
+    phaseObservations(observations, "baseline").map(
+      (observation) => observation.latencyMs,
+    ),
+  );
+  const faultAverageLatencyMs = average(
+    phaseObservations(observations, "fault").map(
+      (observation) => observation.latencyMs,
+    ),
+  );
+  const recoveryAverageLatencyMs = average(
+    phaseObservations(observations, "recovery").map(
+      (observation) => observation.latencyMs,
+    ),
+  );
+  const injected = observations.filter((observation) => observation.injected);
+  const observedInjectedAverage = average(
+    injected.map((observation) => observation.latencyMs),
+  );
+  const observedAdditionalLatencyMs =
+    observedInjectedAverage === undefined ||
+    baselineAverageLatencyMs === undefined
+      ? undefined
+      : Number((observedInjectedAverage - baselineAverageLatencyMs).toFixed(3));
   return {
     totalRequests: observations.length,
     requestsByPhase: {
@@ -399,6 +564,17 @@ export function calculateMetrics(
     ...(averageLatencyMs === undefined ? {} : { averageLatencyMs }),
     ...(medianLatencyMs === undefined ? {} : { medianLatencyMs }),
     recoverySuccessCount: recoverySuccess.length,
+    injectedRequestCount: injected.length,
+    ...(baselineAverageLatencyMs === undefined
+      ? {}
+      : { baselineAverageLatencyMs }),
+    ...(faultAverageLatencyMs === undefined ? {} : { faultAverageLatencyMs }),
+    ...(recoveryAverageLatencyMs === undefined
+      ? {}
+      : { recoveryAverageLatencyMs }),
+    ...(observedAdditionalLatencyMs === undefined
+      ? {}
+      : { observedAdditionalLatencyMs }),
     ...(firstRecovery === undefined
       ? {}
       : {
@@ -497,6 +673,79 @@ export function evaluateRpcBlackout(
   };
 }
 
+export function evaluateRpcLatency(
+  observations: readonly EvidenceObservation[],
+  startedAt: string,
+  schedule: LatencySchedule,
+): ExperimentEvaluation {
+  const metrics = calculateMetrics(observations, startedAt, schedule);
+  const baseline = phase(
+    metrics.requestsByPhase.baseline === 0 ? "inconclusive" : "passed",
+    metrics.requestsByPhase.baseline === 0
+      ? ["baseline_missing"]
+      : ["baseline_established"],
+    metrics.requestsByPhase.baseline === 0
+      ? "No baseline request was observed."
+      : "Baseline request observations established the pre-fault latency.",
+  );
+  const fault = phase(
+    metrics.injectedRequestCount > 0 &&
+      metrics.observedAdditionalLatencyMs !== undefined &&
+      metrics.observedAdditionalLatencyMs >= Math.max(0, schedule.delayMs - 5)
+      ? "passed"
+      : "inconclusive",
+    metrics.injectedRequestCount === 0
+      ? ["fault_observation_missing"]
+      : metrics.observedAdditionalLatencyMs === undefined
+        ? ["baseline_latency_missing"]
+        : metrics.observedAdditionalLatencyMs < schedule.delayMs
+          ? ["configured_delay_not_observed"]
+          : ["latency_injection_observed"],
+    metrics.injectedRequestCount === 0
+      ? "No request was proven to enter the latency interval."
+      : metrics.observedAdditionalLatencyMs === undefined
+        ? "Observed latency could not be compared with a baseline."
+        : `Injected requests observed ${metrics.observedAdditionalLatencyMs}ms of additional latency.`,
+  );
+  const recovery = phase(
+    metrics.requestsByPhase.recovery === 0
+      ? "inconclusive"
+      : metrics.recoveryAverageLatencyMs === undefined
+        ? "inconclusive"
+        : "passed",
+    metrics.requestsByPhase.recovery === 0
+      ? ["recovery_observation_missing"]
+      : ["recovery_observed"],
+    metrics.requestsByPhase.recovery === 0
+      ? "No post-fault request was observed."
+      : "Post-fault requests were observed after the latency interval.",
+  );
+  const phases = [baseline, fault, recovery];
+  const status = phases.some((item) => item.status === "failed")
+    ? "failed"
+    : phases.every((item) => item.status === "passed")
+      ? "passed"
+      : "inconclusive";
+  const reasons = phases.flatMap((item) => item.reasons);
+  return {
+    status,
+    baseline,
+    fault,
+    recovery,
+    reasons,
+    explanation: `RPC latency evaluation is ${status}: ${[
+      baseline.explanation,
+      fault.explanation,
+      recovery.explanation,
+    ].join(" ")}`,
+    metrics,
+    warnings:
+      status === "inconclusive"
+        ? ["Available observations do not establish every required phase."]
+        : [],
+  };
+}
+
 export function createRpcBlackoutEvidence(
   execution: EvidenceExecutionLike,
   schedule: BlackoutSchedule,
@@ -570,10 +819,92 @@ export function createRpcBlackoutEvidence(
   return evidence;
 }
 
+export function createRpcLatencyEvidence(
+  execution: EvidenceExecutionLike,
+  schedule: LatencySchedule,
+  records: readonly ProxyEvidenceLike[],
+  options: {
+    readonly scenarioVersion?: string;
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  } = {},
+): RpcLatencyEvidence {
+  if (
+    options.scenarioVersion !== undefined &&
+    options.scenarioVersion !== RPC_LATENCY_SCENARIO_VERSION
+  ) {
+    throw new EvidenceValidationError(
+      `Unsupported rpc-latency scenario version: ${options.scenarioVersion}.`,
+    );
+  }
+  const startedAt = execution.startedAt ?? new Date(0).toISOString();
+  const finishedAt = execution.finishedAt ?? startedAt;
+  const observations = normalizeLatencyProxyEvidence(
+    records,
+    startedAt,
+    schedule,
+  );
+  const evaluation = evaluateRpcLatency(observations, startedAt, schedule);
+  const completedEvaluation =
+    execution.state === "completed" || evaluation.status === "failed"
+      ? evaluation
+      : {
+          ...evaluation,
+          status: "inconclusive" as const,
+          reasons: [...evaluation.reasons, "execution_not_completed"],
+          explanation: `${evaluation.explanation} Execution ended as ${execution.state} before a complete experiment could be established.`,
+          warnings: [
+            ...evaluation.warnings,
+            "Execution did not complete normally.",
+          ],
+        };
+  const digestInput = {
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    executionId: execution.executionId,
+    scenarioId: "rpc-latency",
+    scenarioVersion: RPC_LATENCY_SCENARIO_VERSION,
+    configuration: schedule,
+    startedAt,
+    finishedAt,
+    terminalState: execution.state,
+    observations,
+    evaluation: completedEvaluation,
+  };
+  const evidence: RpcLatencyEvidence = {
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    recordId: options.recordId ?? randomUUID(),
+    executionId: execution.executionId,
+    scenarioId: "rpc-latency",
+    scenarioVersion: RPC_LATENCY_SCENARIO_VERSION,
+    configuration: schedule,
+    startedAt,
+    finishedAt,
+    terminalState: execution.state,
+    observations,
+    evidenceDigest: createHash("sha256")
+      .update(JSON.stringify(digestInput))
+      .digest("hex"),
+    evaluation: completedEvaluation,
+    warnings: options.warnings ?? [],
+    limitations: options.limitations ?? [
+      "Evaluation proves proxy/request latency behavior, not automatic application resilience.",
+      "Observed latency includes local proxy and upstream timing; it is not a network-only measurement.",
+    ],
+  };
+  validateEvidence(evidence);
+  return evidence;
+}
+
 export function toReplayConfiguration(
-  evidence: RpcBlackoutEvidence,
+  evidence: EvidenceRecord,
 ): ReplayConfiguration {
   validateEvidence(evidence);
+  if (evidence.scenarioId !== "rpc-blackout") {
+    throw new EvidenceValidationError(
+      "Only rpc-blackout evidence supports the legacy replay configuration.",
+    );
+  }
   return {
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
     scenarioId: "rpc-blackout",
@@ -604,11 +935,16 @@ export function replayConfiguration(value: unknown): ReplayRequest {
   };
 }
 
-function configEqual(left: BlackoutSchedule, right: BlackoutSchedule): boolean {
+function configEqual(
+  left: BlackoutSchedule | LatencySchedule,
+  right: BlackoutSchedule | LatencySchedule,
+): boolean {
   return (
     left.startOffsetMs === right.startOffsetMs &&
     left.durationMs === right.durationMs &&
-    left.experimentDurationMs === right.experimentDurationMs
+    left.experimentDurationMs === right.experimentDurationMs &&
+    ("delayMs" in left ? left.delayMs : undefined) ===
+      ("delayMs" in right ? right.delayMs : undefined)
   );
 }
 
@@ -629,8 +965,8 @@ function metric(
 }
 
 export function compareEvidence(
-  left: RpcBlackoutEvidence,
-  right: RpcBlackoutEvidence,
+  left: EvidenceRecord,
+  right: EvidenceRecord,
 ): EvidenceComparison {
   validateEvidence(left);
   validateEvidence(right);
@@ -639,11 +975,11 @@ export function compareEvidence(
       "Evidence records use incompatible schema versions.",
     );
   }
-  const sameConfiguration = configEqual(
-    left.configuration,
-    right.configuration,
-  );
+  const sameConfiguration =
+    left.scenarioId === right.scenarioId &&
+    configEqual(left.configuration, right.configuration);
   const differences: string[] = [];
+  if (left.scenarioId !== right.scenarioId) differences.push("scenario_id");
   if (left.scenarioVersion !== right.scenarioVersion)
     differences.push("scenario_version");
   if (!sameConfiguration) differences.push("blackout_configuration");
@@ -697,7 +1033,7 @@ export function compareEvidence(
 
 export async function writeEvidence(
   path: string,
-  evidence: RpcBlackoutEvidence,
+  evidence: EvidenceRecord,
 ): Promise<void> {
   validateEvidence(evidence);
   await mkdir(dirname(path), { recursive: true });
@@ -729,7 +1065,7 @@ export async function writeEvidence(
   }
 }
 
-export async function readEvidence(path: string): Promise<RpcBlackoutEvidence> {
+export async function readEvidence(path: string): Promise<EvidenceRecord> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -746,7 +1082,7 @@ export async function readEvidence(path: string): Promise<RpcBlackoutEvidence> {
 
 export async function listEvidence(
   directory: string,
-): Promise<readonly RpcBlackoutEvidence[]> {
+): Promise<readonly EvidenceRecord[]> {
   let names: readonly string[];
   try {
     names = await readdir(directory);
@@ -757,18 +1093,16 @@ export async function listEvidence(
       }`,
     );
   }
-  const records: RpcBlackoutEvidence[] = [];
+  const records: EvidenceRecord[] = [];
   for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
     records.push(await readEvidence(join(directory, name)));
   }
   return records;
 }
 
-export function toJsonReport(evidence: RpcBlackoutEvidence): string;
+export function toJsonReport(evidence: EvidenceRecord): string;
 export function toJsonReport(result: ExperimentResult): string;
-export function toJsonReport(
-  value: RpcBlackoutEvidence | ExperimentResult,
-): string {
+export function toJsonReport(value: EvidenceRecord | ExperimentResult): string {
   if ("schemaVersion" in value) {
     validateEvidence(value);
   }

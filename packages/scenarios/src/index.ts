@@ -13,6 +13,19 @@ export const rpcBlackoutScenario: ScenarioDefinition = {
   },
 };
 
+export const rpcLatencyScenario: ScenarioDefinition = {
+  scenarioId: "rpc-latency",
+  version: "1.0.0",
+  name: "RPC latency",
+  status: "supported",
+  description: "Deterministic response delay against loopback RPC traffic.",
+  requiredMode: "local",
+  parameters: {
+    fault: "response-delay",
+    targetScope: "loopback",
+  },
+};
+
 export function validateScenarioMode(
   scenario: ScenarioDefinition,
   mode: TestMode,

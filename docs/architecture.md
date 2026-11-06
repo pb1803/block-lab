@@ -238,6 +238,14 @@ request ID and do not contact the upstream. `runRpcBlackout` starts the proxy
 inside an existing execution and registers its close operation with the
 execution cleanup stack, including timeout and cancellation paths.
 
+The `rpc-latency` schedule uses the same half-open interval. A request whose
+start timestamp is inside that interval waits exactly `delayMs` before it is
+forwarded; requests outside the interval are forwarded normally. Requests are
+handled independently, and the delay is aborted when proxy cleanup aborts its
+request controller. There is no jitter, signing support, transaction support,
+or silent fallback. The fixed delay measures proxy-observed behavior, not a
+claim about application resilience or network-only latency.
+
 This phase does not launch imported project scripts, manage Anvil/Docker, or
 provide a hosted proxy. Cancellation signals cooperative tasks; an arbitrary
 uncooperative asynchronous task cannot be forcibly terminated by this library.
@@ -267,6 +275,13 @@ copies only the normalized schedule and creates new IDs. Comparison rejects
 incompatible schema versions and labels metrics as non-comparable when
 configurations differ; it does not infer causation or application failover.
 
+Latency evidence uses the same schema version with scenario version
+`rpc-latency` `1.0.0`. It records request and completion timestamps, whether
+the fixed delay was applied, configured delay, phase-specific average latency,
+injected request count, and observed additional latency. Its evaluator proves
+that the proxy observed a baseline, a delayed request, and post-fault
+forwarding; it does not prove that the dApp handled the slower RPC correctly.
+
 Evidence persistence is local JSON only. Writes create a temporary file and
 atomically link it into place without overwriting an existing record. Reads
 validate the schema, and malformed or unsupported files fail explicitly.
@@ -281,6 +296,18 @@ explicit loopback upstream; `runs`, `report`, `replay`, and `compare` operate
 on validated local evidence records. Replay stores only the normalized schedule
 and requires a new explicit upstream because full upstream URLs are not
 persisted.
+
+`test rpc-latency` uses the same proxy and lifecycle with explicit `--delay`,
+`--start-offset`, `--duration`, and `--experiment-duration` options:
+
+```powershell
+node apps/cli/dist/index.js test rpc-latency `
+  --upstream http://127.0.0.1:8545 `
+  --delay 250 --start-offset 100 --duration 500 --experiment-duration 800
+```
+
+Latency replay reuses the stored schedule and still requires an explicit
+loopback upstream. No public upstream is selected automatically.
 
 The default evidence directory is platform-specific and outside inspected
 projects. `--evidence-dir` takes precedence over the

@@ -111,17 +111,26 @@ export interface RpcProxyEvidence {
   readonly executionId: string;
   readonly scenarioId: string;
   readonly timestamp: string;
+  readonly requestTimestamp?: string;
   readonly method: string;
   readonly requestId?: string | number | null;
   readonly correlationId: string;
   readonly outcome: ProxyOutcome;
   readonly injected: boolean;
   readonly latencyMs: number;
+  readonly injectedDelayMs?: number;
   readonly upstreamOrigin: string;
   readonly errorCategory?: ProxyErrorCategory;
 }
 
 export interface BlackoutConfig {
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface LatencyConfig {
+  readonly delayMs: number;
   readonly startOffsetMs: number;
   readonly durationMs: number;
   readonly experimentDurationMs?: number;
@@ -134,6 +143,7 @@ export interface RpcProxyConfig {
   readonly requestBodyLimitBytes?: number;
   readonly upstreamTimeoutMs?: number;
   readonly blackout?: BlackoutConfig;
+  readonly latency?: LatencyConfig;
   readonly now?: () => number;
   readonly executionId?: string;
   readonly scenarioId?: string;
@@ -150,7 +160,17 @@ export interface RpcBlackoutExecutionConfig {
   readonly proxy: RpcProxyConfig;
 }
 
+export interface RpcLatencyExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
 export type RpcBlackoutWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+export type RpcLatencyWorkload<T> = (
   proxy: RpcProxy,
   context: ExecutionContext,
 ) => T | Promise<T>;
@@ -345,6 +365,31 @@ function assertBlackoutConfig(config: BlackoutConfig): void {
   }
 }
 
+function assertLatencyConfig(config: LatencyConfig): void {
+  if (
+    !Number.isInteger(config.delayMs) ||
+    config.delayMs <= 0 ||
+    !Number.isInteger(config.startOffsetMs) ||
+    config.startOffsetMs < 0 ||
+    !Number.isInteger(config.durationMs) ||
+    config.durationMs <= 0
+  ) {
+    throw new PreflightError(
+      "Latency delay and duration must be positive integers; start offset must be non-negative.",
+    );
+  }
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0 ||
+      config.startOffsetMs + config.durationMs > config.experimentDurationMs)
+  ) {
+    throw new PreflightError(
+      "Latency fault window must fit within the positive experiment duration.",
+    );
+  }
+}
+
 function upstreamOrigin(upstreamUrl: string): string {
   try {
     const url = new URL(upstreamUrl);
@@ -402,6 +447,7 @@ export function preflightRpcProxy(config: RpcProxyConfig): void {
     );
   }
   if (config.blackout !== undefined) assertBlackoutConfig(config.blackout);
+  if (config.latency !== undefined) assertLatencyConfig(config.latency);
 }
 
 function safeRequestId(value: unknown): string | number | null | undefined {
@@ -556,6 +602,31 @@ export class RpcProxy {
     );
   }
 
+  private latencyActive(): boolean {
+    const latency = this.config.latency;
+    if (latency === undefined) return false;
+    const elapsed = this.currentTime() - this.startedAt;
+    return (
+      elapsed >= latency.startOffsetMs &&
+      elapsed < latency.startOffsetMs + latency.durationMs
+    );
+  }
+
+  private async delay(durationMs: number, signal: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, durationMs);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        reject(new DOMException("Request was cancelled.", "AbortError"));
+      };
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
   private record(
     request: {
       method: string;
@@ -566,11 +637,13 @@ export class RpcProxy {
     started: number,
     injected: boolean,
     errorCategory?: ProxyErrorCategory,
+    injectedDelayMs?: number,
   ): void {
     const record: RpcProxyEvidence = {
       executionId: this.config.executionId ?? "unattached",
       scenarioId: this.config.scenarioId ?? "rpc-blackout",
       timestamp: new Date(this.currentTime()).toISOString(),
+      requestTimestamp: new Date(started).toISOString(),
       method: request.method,
       correlationId: request.correlationId,
       outcome,
@@ -579,6 +652,7 @@ export class RpcProxy {
       upstreamOrigin: upstreamOrigin(this.config.upstreamUrl),
       ...(request.id === undefined ? {} : { requestId: request.id }),
       ...(errorCategory === undefined ? {} : { errorCategory }),
+      ...(injectedDelayMs === undefined ? {} : { injectedDelayMs }),
     };
     this.evidenceRecords.push(record);
   }
@@ -724,11 +798,21 @@ export class RpcProxy {
     }
     const controller = new AbortController();
     this.activeRequests.add(controller);
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.upstreamTimeoutMs,
-    );
+    const latencyInjected = this.latencyActive();
+    const configuredDelayMs = latencyInjected
+      ? this.config.latency?.delayMs
+      : undefined;
+    let delayCompleted = configuredDelayMs === undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
+      if (configuredDelayMs !== undefined) {
+        await this.delay(configuredDelayMs, controller.signal);
+        delayCompleted = true;
+      }
+      timeout = setTimeout(
+        () => controller.abort(),
+        this.config.upstreamTimeoutMs,
+      );
       const upstreamResponse = await fetch(this.config.upstreamUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -745,32 +829,49 @@ export class RpcProxy {
         requestInfo,
         upstreamResponse.ok ? "forwarded_success" : "forwarded_error",
         started,
-        false,
+        latencyInjected,
         upstreamResponse.ok ? undefined : "upstream_http",
+        configuredDelayMs,
       );
     } catch (error) {
+      const cancelledDuringDelay = !delayCompleted && controller.signal.aborted;
       const timedOut =
         error instanceof DOMException && error.name === "AbortError";
-      const category = timedOut ? "upstream_timeout" : "upstream_unavailable";
+      const category = cancelledDuringDelay
+        ? "proxy_error"
+        : timedOut
+          ? "upstream_timeout"
+          : "upstream_unavailable";
       const errorCategory = timedOut
-        ? "upstream_timeout"
+        ? cancelledDuringDelay
+          ? "proxy"
+          : "upstream_timeout"
         : "upstream_connection";
-      this.record(requestInfo, category, started, false, errorCategory);
+      this.record(
+        requestInfo,
+        category,
+        started,
+        latencyInjected,
+        errorCategory,
+        configuredDelayMs,
+      );
       if (!response.writableEnded) {
         writeJson(
           response,
           200,
           rpcError(
             id ?? null,
-            timedOut ? -32001 : -32002,
-            timedOut
-              ? "Upstream RPC request timed out."
-              : "Upstream RPC endpoint is unavailable.",
+            cancelledDuringDelay ? -32003 : timedOut ? -32001 : -32002,
+            cancelledDuringDelay
+              ? "RPC request was cancelled."
+              : timedOut
+                ? "Upstream RPC request timed out."
+                : "Upstream RPC endpoint is unavailable.",
           ),
         );
       }
     } finally {
-      clearTimeout(timeout);
+      if (timeout !== undefined) clearTimeout(timeout);
       this.activeRequests.delete(controller);
     }
   }
@@ -792,6 +893,36 @@ export function runRpcBlackout<T>(
     parameters: {
       ...(config.execution.parameters ?? {}),
       ...(config.proxy.blackout ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
+}
+
+export function runRpcLatency<T>(
+  config: RpcLatencyExecutionConfig,
+  workload: RpcLatencyWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-latency",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-latency",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.latency ?? {}),
     },
   };
   preflightExecution(execution);

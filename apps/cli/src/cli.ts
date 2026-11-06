@@ -4,9 +4,10 @@ import { join, resolve } from "node:path";
 import {
   compareEvidence,
   createRpcBlackoutEvidence,
+  createRpcLatencyEvidence,
   type EvidenceComparison,
+  type EvidenceRecord,
   EvidenceValidationError,
-  type RpcBlackoutEvidence,
   readEvidence,
   replayConfiguration,
   toJsonReport,
@@ -19,7 +20,11 @@ import {
   inspectProject,
 } from "@blocklab/inspector";
 import { RpcProxy, startExecution } from "@blocklab/runner";
-import { rpcBlackoutScenario, validateScenarioMode } from "@blocklab/scenarios";
+import {
+  rpcBlackoutScenario,
+  rpcLatencyScenario,
+  validateScenarioMode,
+} from "@blocklab/scenarios";
 
 export const CLI_VERSION = "0.1.0";
 export const EXIT_CODES = {
@@ -139,7 +144,7 @@ export function getCliConfig(): CliConfig {
   return {
     evidenceDirectory: defaultEvidenceDirectory(),
     defaultProxy: { host: "127.0.0.1", port: 0, upstream: "required" },
-    supportedScenarios: ["rpc-blackout"],
+    supportedScenarios: ["rpc-blackout", "rpc-latency"],
     precedence: [
       "Command-line options",
       "BLOCKLAB_EVIDENCE_DIR for evidence storage only",
@@ -191,6 +196,7 @@ function printHelp(output: (value: string) => void): void {
   output("Usage:\n");
   output("  blocklab inspect [directory] [--json]\n");
   output("  blocklab test rpc-blackout --upstream <loopback-url> [options]\n");
+  output("  blocklab test rpc-latency --upstream <loopback-url> [options]\n");
   output("  blocklab runs list [--json]\n");
   output("  blocklab runs show <execution-id> [--json]\n");
   output("  blocklab report <execution-id> [--json]\n");
@@ -200,7 +206,7 @@ function printHelp(output: (value: string) => void): void {
   output("  blocklab compare <execution-id-a> <execution-id-b> [--json]\n");
   output("  blocklab config [--json]\n\n");
   output(
-    "Options: --evidence-dir, --port, --start-offset, --duration, --experiment-duration, --timeout, --json\n",
+    "Options: --evidence-dir, --port, --delay, --start-offset, --duration, --experiment-duration, --timeout, --json\n",
   );
   output(
     "\nAnon-RPC is browser-only: the CLI never imports or emulates the harness.\nRun the sample dApp (apps/sample-dapp) or Studio for Anon-RPC measurements.\n",
@@ -235,7 +241,7 @@ function evidencePath(directory: string, executionId: string): string {
 async function loadRun(
   directory: string,
   executionId: string,
-): Promise<RpcBlackoutEvidence> {
+): Promise<EvidenceRecord> {
   if (!/^[0-9a-f-]{20,}$/i.test(executionId)) {
     throw new CliError("Execution ID is invalid.");
   }
@@ -252,7 +258,7 @@ async function loadRun(
 }
 
 async function listRuns(directory: string): Promise<{
-  readonly records: readonly RpcBlackoutEvidence[];
+  readonly records: readonly EvidenceRecord[];
   readonly malformed: readonly string[];
 }> {
   let names: readonly string[];
@@ -264,7 +270,7 @@ async function listRuns(directory: string): Promise<{
     }
     throw error;
   }
-  const records: RpcBlackoutEvidence[] = [];
+  const records: EvidenceRecord[] = [];
   const malformed: string[] = [];
   for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
     try {
@@ -282,7 +288,7 @@ async function listRuns(directory: string): Promise<{
 }
 
 function printEvaluation(
-  evidence: RpcBlackoutEvidence,
+  evidence: EvidenceRecord,
   output: (value: string) => void,
 ): void {
   const metrics = evidence.evaluation.metrics;
@@ -320,33 +326,64 @@ function printEvaluation(
 async function executeExperiment(
   directory: string,
   upstream: string,
-  schedule: {
-    readonly startOffsetMs: number;
-    readonly durationMs: number;
-    readonly experimentDurationMs: number;
-  },
+  scenario: "rpc-blackout" | "rpc-latency",
+  schedule:
+    | {
+        readonly startOffsetMs: number;
+        readonly durationMs: number;
+        readonly experimentDurationMs: number;
+      }
+    | {
+        readonly delayMs: number;
+        readonly startOffsetMs: number;
+        readonly durationMs: number;
+        readonly experimentDurationMs: number;
+      },
   port: number,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<RpcBlackoutEvidence> {
-  validateScenarioMode(rpcBlackoutScenario, "local");
+): Promise<EvidenceRecord> {
+  validateScenarioMode(
+    scenario === "rpc-blackout" ? rpcBlackoutScenario : rpcLatencyScenario,
+    "local",
+  );
   let proxy: RpcProxy | undefined;
   let experimentStartedAt: string | undefined;
   const handle = startExecution(
     {
-      scenarioId: "rpc-blackout",
+      scenarioId: scenario,
       timeoutMs,
       target: upstream,
       parameters: schedule,
     },
     async (context) => {
-      proxy = new RpcProxy({
-        upstreamUrl: upstream,
-        port,
-        blackout: schedule,
-        executionId: context.executionId,
-        scenarioId: "rpc-blackout",
-      });
+      const proxyConfig =
+        scenario === "rpc-blackout"
+          ? "delayMs" in schedule
+            ? (() => {
+                throw new CliError(
+                  "Latency configuration cannot run as rpc-blackout.",
+                );
+              })()
+            : {
+                upstreamUrl: upstream,
+                port,
+                blackout: schedule,
+                executionId: context.executionId,
+                scenarioId: scenario,
+              }
+          : "delayMs" in schedule
+            ? {
+                upstreamUrl: upstream,
+                port,
+                latency: schedule,
+                executionId: context.executionId,
+                scenarioId: scenario,
+              }
+            : (() => {
+                throw new CliError("Latency configuration requires --delay.");
+              })();
+      proxy = new RpcProxy(proxyConfig);
       await proxy.start();
       experimentStartedAt = proxy.experimentStartedAt;
       context.registerCleanup("rpc-proxy", () => proxy?.close());
@@ -385,33 +422,41 @@ async function executeExperiment(
   const records = Array.isArray(result.value)
     ? result.value
     : (proxy?.evidence ?? []);
-  const evidence = createRpcBlackoutEvidence(
-    {
-      executionId: result.executionId,
-      state:
-        result.state === "completed" ||
-        result.state === "failed" ||
-        result.state === "cancelled" ||
-        result.state === "timed_out"
-          ? result.state
-          : "failed",
-      ...(experimentStartedAt === undefined &&
-      handle.context.startedAt === undefined
-        ? {}
-        : { startedAt: experimentStartedAt ?? handle.context.startedAt }),
-      ...(handle.context.finishedAt === undefined
-        ? {}
-        : { finishedAt: handle.context.finishedAt }),
-    },
-    schedule,
-    records,
-    {
-      warnings:
-        result.cleanupFailures.length > 0
-          ? ["One or more cleanup handlers failed."]
-          : [],
-    },
-  );
+  const execution = {
+    executionId: result.executionId,
+    state:
+      result.state === "completed" ||
+      result.state === "failed" ||
+      result.state === "cancelled" ||
+      result.state === "timed_out"
+        ? result.state
+        : "failed",
+    ...(experimentStartedAt === undefined &&
+    handle.context.startedAt === undefined
+      ? {}
+      : { startedAt: experimentStartedAt ?? handle.context.startedAt }),
+    ...(handle.context.finishedAt === undefined
+      ? {}
+      : { finishedAt: handle.context.finishedAt }),
+  } as const;
+  const warnings =
+    result.cleanupFailures.length > 0
+      ? ["One or more cleanup handlers failed."]
+      : [];
+  const evidence =
+    scenario === "rpc-blackout"
+      ? "delayMs" in schedule
+        ? (() => {
+            throw new CliError(
+              "Latency configuration cannot create blackout evidence.",
+            );
+          })()
+        : createRpcBlackoutEvidence(execution, schedule, records, { warnings })
+      : "delayMs" in schedule
+        ? createRpcLatencyEvidence(execution, schedule, records, { warnings })
+        : (() => {
+            throw new CliError("Latency evidence requires a delay.");
+          })();
   await writeEvidence(evidencePath(directory, evidence.executionId), evidence);
   return evidence;
 }
@@ -480,7 +525,9 @@ export async function runCli(
       return EXIT_CODES.success;
     }
     if (command === "scenarios") {
-      stdout(`${JSON.stringify([rpcBlackoutScenario], null, 2)}\n`);
+      stdout(
+        `${JSON.stringify([rpcBlackoutScenario, rpcLatencyScenario], null, 2)}\n`,
+      );
       return EXIT_CODES.success;
     }
     const evidenceDirectory = option(parsed, "evidence-dir");
@@ -532,41 +579,65 @@ export async function runCli(
       return EXIT_CODES.success;
     }
     if (command === "test" || command === "replay") {
-      const scenario =
-        command === "test" ? parsed.positionals[1] : "rpc-blackout";
-      if (scenario !== "rpc-blackout")
-        throw new CliError("Only the rpc-blackout scenario is supported.");
       const upstream = requiredOption(parsed, "upstream");
       const source =
         command === "replay"
           ? await loadRun(directory, parsed.positionals[1] ?? "")
           : undefined;
+      const scenario =
+        command === "test" ? parsed.positionals[1] : source?.scenarioId;
+      if (scenario !== "rpc-blackout" && scenario !== "rpc-latency")
+        throw new CliError(
+          "Supported scenarios are rpc-blackout and rpc-latency.",
+        );
+      if (source !== undefined && source.scenarioId !== scenario)
+        throw new CliError(
+          "Replay scenario does not match the requested scenario.",
+        );
       const replayedSchedule =
         source === undefined
           ? undefined
-          : replayConfiguration(toReplayConfiguration(source)).configuration;
-      const schedule = {
-        startOffsetMs:
-          replayedSchedule?.startOffsetMs ??
-          integerOption(parsed, "start-offset", 100),
-        durationMs:
-          replayedSchedule?.durationMs ??
-          integerOption(parsed, "duration", 200),
-        experimentDurationMs:
-          replayedSchedule?.experimentDurationMs ??
-          integerOption(parsed, "experiment-duration", 400),
-      };
+          : source.scenarioId === "rpc-blackout"
+            ? replayConfiguration(toReplayConfiguration(source)).configuration
+            : source.configuration;
+      const schedule =
+        scenario === "rpc-blackout"
+          ? {
+              startOffsetMs:
+                replayedSchedule?.startOffsetMs ??
+                integerOption(parsed, "start-offset", 100),
+              durationMs:
+                replayedSchedule?.durationMs ??
+                integerOption(parsed, "duration", 200),
+              experimentDurationMs:
+                replayedSchedule?.experimentDurationMs ??
+                integerOption(parsed, "experiment-duration", 400),
+            }
+          : {
+              delayMs:
+                replayedSchedule !== undefined && "delayMs" in replayedSchedule
+                  ? replayedSchedule.delayMs
+                  : integerOption(parsed, "delay", 100),
+              startOffsetMs:
+                replayedSchedule?.startOffsetMs ??
+                integerOption(parsed, "start-offset", 100),
+              durationMs:
+                replayedSchedule?.durationMs ??
+                integerOption(parsed, "duration", 200),
+              experimentDurationMs:
+                replayedSchedule?.experimentDurationMs ??
+                integerOption(parsed, "experiment-duration", 400),
+            };
       if (
         schedule.startOffsetMs + schedule.durationMs >
         schedule.experimentDurationMs
       ) {
-        throw new CliError(
-          "Blackout window must fit within experiment duration.",
-        );
+        throw new CliError("Fault window must fit within experiment duration.");
       }
       const evidence = await executeExperiment(
         directory,
         upstream,
+        scenario,
         schedule,
         integerOption(parsed, "port", 0),
         integerOption(parsed, "timeout", schedule.experimentDurationMs + 1_000),

@@ -202,6 +202,31 @@ unimplemented.
 
 **Exit gate:** The local CLI is independently useful and has actionable failure messages.
 
+## ATTACK-01 — Deterministic RPC latency injection
+
+The `rpc-latency` scenario is implemented on the existing loopback `RpcProxy`.
+It accepts an explicit fixed `delayMs`, `startOffsetMs`, fault `durationMs`,
+and overall `experimentDurationMs`. A request is delayed only when its start
+timestamp is inside `[startOffsetMs, startOffsetMs + durationMs)`; the
+interval is half-open, deterministic, and has no jitter. Delay timers are
+abortable through proxy cleanup and do not forward cancelled requests.
+
+The CLI command is:
+
+```text
+blocklab test rpc-latency --upstream <loopback-url> --delay <ms>
+  [--start-offset <ms>] [--duration <ms>]
+  [--experiment-duration <ms>] [--timeout <ms>]
+```
+
+Latency evidence records request/completion timestamps, injected state,
+observed latency, phase metrics, cancellation/timeout terminal state, and
+limitations. It proves proxy behavior and recovery forwarding only; it does
+not prove dApp-level resilience. Replay and comparison remain local and
+require an explicit loopback upstream.
+
+**Status:** Complete and validated by runner, evidence, and CLI tests.
+
 ## Phase 12 — Anon-RPC browser POC
 
 1. Use `@anon-rpc/browser-harness@0.4.0` in a browser-only fixture.
