@@ -120,6 +120,39 @@ Order of gated steps, each of which stops the run:
 8. The driver waits for the mined receipt, then re-reads the entity in its own
    process (not through Studio's state) and prints the evidence block.
 
+To rehearse everything except the signature, add `--check-only`: the run performs
+every gate above, prints the approval card, and stops with "nothing was signed".
+
+## Verifying a publication afterwards
+
+`verify:entity` is the same verification, standalone and independent of Studio:
+
+```bash
+# by entity key, with the canonical record, the expected signer and the tx hash
+pnpm --filter @blocklab/studio run verify:entity --   --entity 0x… --record /path/to/record.json --signer 0x… --tx 0x…
+
+# by experiment id (exit 3 = nothing is published under that id)
+pnpm --filter @blocklab/studio run verify:entity -- --experiment-id studio-mm-001
+```
+
+It reports payload bytes and SHA-256, byte-identity with the canonical record,
+revalidation against the shared contract, `owner == creator == signer`, the
+expiry window, the mined receipt and the actual gas cost, then exits 0 only when
+every check passes. Exit codes: `0` verified, `1` not verified, `2` blocked
+(no access key / wrong chain / bad arguments), `3` nothing published.
+
+The verifier is not theoretical: it was run against the existing, already
+verified `poc-write-001` entity as a control —
+
+- entity `0x1d7b6bf8…b31a`, payload 603 bytes, SHA-256 `410e3d5c…38f4d`,
+  byte-identical to the reconstructed canonical record, `owner == creator ==
+  signer 0x8C58af…8759`, expiry `+302400` blocks, receipt success at block
+  `269199`, gas `209105 × 1 gwei = 0.000209105 tGLM` → **10/10 checks passed**;
+- `--experiment-id studio-mm-001` → exit 3, "nothing to verify".
+
+That control run re-verifies ARK-03's existing publication only; it is **not** a
+second publication and does not change ARK-07's status.
+
 ## Failure handling
 
 - **Rejected in MetaMask**: reported as a user rejection; nothing was written and

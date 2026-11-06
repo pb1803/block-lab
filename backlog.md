@@ -176,7 +176,13 @@ Arkiv status notes (Phase 14 POC, [docs/arkiv-poc.md](docs/arkiv-poc.md)):
   the built Studio in headless Chrome, and the driver refusing both a wallet-less
   page and a non-MetaMask provider (exit 2, no transaction, no retry). The MetaMask
   approval itself is a human click and has NOT happened, so no publication is
-  claimed and the runbook says so.
+  claimed and the runbook says so. The post-publication check now exists as a
+  shared, tested verifier (`src/arkiv/verify-publication.ts`, 12 tests; CLI
+  `verify:entity`) that the driver also uses, and it was validated live as a
+  control against the *existing* `poc-write-001` entity (10/10 checks: 603 bytes,
+  SHA-256 `410e3d5c…38f4d`, byte-identical to the reconstructed canonical record,
+  owner==creator==signer, expiry +302400 blocks, receipt success at block 269199,
+  gas 0.000209105 tGLM). That control re-verifies ARK-03, not a second write.
 - **SUB-03 DONE (2026-11-06)**: a real write/query/retrieve run now exists and is verified (ARK-03 + read-back above); Studio integration for Phase 15 can gate on it instead of mock claims.
 - **Phase 15 Studio integration (2026-11-06)**: `apps/studio/src/arkiv/` adds
   wallet connect/chain detection, gated publish with duplicate preflight and

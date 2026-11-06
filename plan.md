@@ -367,6 +367,11 @@ mined, the entity reads back, every payload field matches, actual gas was
     both refusal paths (no provider, non-MetaMask provider → exit 2), and preflight
     5/5 against Rabdi. The MetaMask signature is a human click and has not been
     performed, so ARK-07 stays PARTIAL and no second publication is claimed.
+    `--check-only` rehearses every gate without signing, and the verification step
+    is a shared module (`src/arkiv/verify-publication.ts`, 12 tests) with a
+    standalone `verify:entity` CLI — validated live as a control against the
+    existing `poc-write-001` entity (10/10 checks, byte-identical, gas reproduced)
+    and against `studio-mm-001` (exit 3, nothing published).
 
 Verification for this phase: 313 tests / 33 files, lint/typecheck/build clean, and
 a real headless-Chrome run (`scripts/studio-arkiv-check.mjs`, 20/20 checks) with a

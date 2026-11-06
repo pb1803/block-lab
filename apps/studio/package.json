@@ -8,11 +8,12 @@
     "./arkiv": "./dist/arkiv/index.js"
   },
   "scripts": {
-    "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
+    "dev": "vite",
+    "preflight:test": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-preflight.mjs",
     "preview": "vite preview",
     "record:test": "node scripts/studio-mm-001-record.mjs",
-    "preflight:test": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-preflight.mjs",
+    "verify:entity": "node --env-file=../arkiv-poc/.env.local scripts/verify-entity.mjs",
     "verify:live": "node --env-file=../arkiv-poc/.env.local scripts/studio-arkiv-live.mjs"
   },
   "dependencies": {

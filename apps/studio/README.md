@@ -189,14 +189,20 @@ panel adds exactly one write path (Publish), and only from an explicit click.
   - `pnpm --filter @blocklab/studio run preflight:test` is the read-only gate:
     access key present, chain `7794095`, head block readable, no duplicate for the
     probe id, explorer reachable. It signs nothing.
+  - `pnpm --filter @blocklab/studio run verify:entity -- --entity 0x…` (or
+    `--experiment-id studio-mm-001`) is the standalone verification: payload
+    bytes/SHA-256, byte-identity with a canonical record, revalidation, ownership,
+    expiry, receipt and actual gas, in a process independent of Studio. Exit 0 only
+    when every check passes, 3 when nothing is published under that id.
   - `pnpm --filter @blocklab/studio run verify:live -- --port 9229` drives a
     real, debuggable Chrome with MetaMask: it refuses any provider whose
     `isMetaMask` is not true, checks balance before signing, re-runs the duplicate
     preflight, requires the pasted record to equal the canonical bytes and only
     then waits for your MetaMask approval; afterwards it re-reads the entity in a
     separate process and byte-compares the payload. Without `--arm-publish` it
-    waits for your Publish click. No private key is ever read, and a failed write
-    is re-checked once instead of retried.
+    waits for your Publish click; `--check-only` stops after the approval card and
+    signs nothing. No private key is ever read, and a failed write is re-checked
+    once instead of retried.
 - Configuration: `VITE_ARKIV_ACCESS_KEY` enables the read/write gateway. Without
   it the panel is display-only and every gateway-dependent action reports
   "Gateway is not ready." — no silent fallback.

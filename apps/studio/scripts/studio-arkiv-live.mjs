@@ -28,7 +28,7 @@
  *
  * Usage:
  *   node --env-file=apps/arkiv-poc/.env.local apps/studio/scripts/studio-arkiv-live.mjs \
- *     --port 9229 --url http://localhost:5178/ [--arm-publish] [--timeout 600]
+ *     --port 9229 --url http://localhost:5178/ [--check-only] [--arm-publish] [--timeout 600]
  *
  * Without `--arm-publish` the driver stops at the approval card and waits for
  * you to click Studio's Publish button. With it, the driver clicks Publish once
@@ -47,6 +47,7 @@ import {
   validateExperimentMetadata,
 } from "@blocklab/arkiv-metadata";
 import { experimentSchema } from "../src/arkiv/schema.ts";
+import { buildPublicationEvidence } from "../src/arkiv/verify-publication.ts";
 import { buildRecord, EXPERIMENT_ID } from "./studio-mm-001-record.mjs";
 
 const RABDI_CHAIN_ID = 7_794_095;
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     url: "http://localhost:5178/",
     timeoutSec: 600,
     armPublish: false,
+    checkOnly: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -66,6 +68,7 @@ function parseArgs(argv) {
     else if (flag === "--url") args.url = value;
     else if (flag === "--timeout") args.timeoutSec = Number(value);
     else if (flag === "--arm-publish") args.armPublish = true;
+    else if (flag === "--check-only") args.checkOnly = true;
   }
   return args;
 }
@@ -388,6 +391,16 @@ async function main() {
   console.log("  publishes exactly one compact, validated record; evidence stays local.");
   console.log("---------------------------------------------------------------------\n");
 
+  if (args.checkOnly) {
+    console.log(
+      "CHECK ONLY: every gate passed and the record is ready, but nothing was signed and " +
+        "no entity was written. Re-run without --check-only to publish.",
+    );
+    cdp.close();
+    process.exitCode = 0;
+    return;
+  }
+
   if (args.armPublish) {
     const result = await cdp.evaluate(clickAction("publish"));
     console.log(`publish click: ${result}`);
@@ -464,38 +477,24 @@ async function main() {
   console.log(`entity key: ${entityKey}`);
   if (txHash !== null) console.log(`tx hash: ${txHash}`);
 
-  // 9. Independent read-back in this separate process (not via Studio's state).
+  // 9. Independent read-back in this separate process (not via Studio's state),
+  //    using the same pure verifier that `verify-entity.mjs` exposes.
   const row = await publicClient.getEntity(entityKey, experimentSchema);
-  const onChainBytes =
-    row.payload?.value === undefined
-      ? new Uint8Array()
-      : Buffer.from(String(row.payload.value).slice(2), "hex");
-  const byteIdentical =
-    onChainBytes.length === canonicalBytes.length &&
-    Buffer.from(canonicalBytes).equals(onChainBytes);
-  const storedJson = byteIdentical ? new TextDecoder().decode(onChainBytes) : null;
-  let revalidated = false;
-  if (storedJson !== null) {
-    try {
-      revalidated = validateExperimentMetadata(JSON.parse(storedJson)).ok;
-    } catch {
-      revalidated = false;
-    }
-  }
-  const owner = String(row.$owner);
-  const creator = String(row.$creator);
-
-  let receipt = null;
+  let receipt;
   if (txHash !== null) {
-    receipt = await publicClient
+    const raw = await publicClient
       .getTransactionReceipt({ hash: txHash })
       .catch(() => null);
+    if (raw !== null) {
+      receipt = {
+        status: raw.status === "success" ? "success" : "reverted",
+        blockNumber: Number(raw.blockNumber),
+        gasUsed: Number(raw.gasUsed),
+        effectiveGasPriceWei: String(raw.effectiveGasPrice),
+      };
+    }
   }
-  const gasUsed = receipt === null ? null : Number(receipt.gasUsed);
-  const gasPrice = receipt === null ? null : Number(receipt.effectiveGasPrice);
-  const gasCostWei = gasUsed !== null && gasPrice !== null ? gasUsed * gasPrice : null;
-
-  const findAgain = await publicClient
+  const foundAgain = await publicClient
     .select({ $key: true })
     .from(experimentSchema)
     .where(eq("experimentId", EXPERIMENT_ID))
@@ -503,50 +502,29 @@ async function main() {
     .fetch()
     .catch(() => undefined);
 
-  const evidence = {
-    kind: "blocklab.arkiv-publication",
+  const evidence = await buildPublicationEvidence({
     experimentId: EXPERIMENT_ID,
     network: { name: "rabdi", chainId: RABDI_CHAIN_ID, chainIdHex: "0x76edaf" },
-    wallet: { provider: "MetaMask", address: signer },
-    txHash,
-    receiptStatus: receipt === null ? null : receipt.status,
-    blockNumber: receipt === null ? null : Number(receipt.blockNumber),
+    signer,
     entityKey,
-    owner,
-    creator,
-    ownerEqualsCreator: owner.toLowerCase() === creator.toLowerCase(),
-    ownerEqualsSigner: owner.toLowerCase() === signer.toLowerCase(),
-    createdAtBlock: Number(row.$createdAt),
-    updatedAtBlock: Number(row.$updatedAt),
-    expiresAtBlock: Number(row.$expiresAt),
-    payloadSha256,
-    payloadBytes: onChainBytes.length,
-    byteIdenticalToSubmitted: byteIdentical,
-    revalidatesAgainstSharedSchema: revalidated,
-    findableByExperimentId: (findAgain?.entities[0]?.$key ?? null) === entityKey,
-    explorer: `${EXPLORER}/entity/${entityKey}`,
-    gas: {
-      gasUsed,
-      effectiveGasPriceWei: gasPrice,
-      costWei: gasCostWei,
-      costTglm: gasCostWei === null ? null : gasCostWei / 1e18,
+    row: {
+      $key: row.$key,
+      $owner: row.$owner,
+      $creator: row.$creator,
+      $createdAt: row.$createdAt,
+      $updatedAt: row.$updatedAt,
+      $expiresAt: row.$expiresAt,
+      payload: row.payload,
     },
-    studioReadBack: publish.readBack ?? null,
-    verified:
-      byteIdentical &&
-      revalidated &&
-      owner.toLowerCase() === signer.toLowerCase() &&
-      receipt !== null &&
-      receipt.status === "success",
-  };
+    canonical: record,
+    receipt,
+    foundByExperimentId: foundAgain?.entities[0]?.$key ?? null,
+    txHash: txHash ?? undefined,
+    explorerBase: EXPLORER,
+  });
 
   console.log("\n--- independent read-back verification ------------------------------");
-  console.log(JSON.stringify(evidence, null, 2));
-  const exceptions = cdp.exceptions();
-  if (exceptions.length > 0) {
-    console.log(`page exceptions: ${exceptions.slice(0, 3).join(" | ")}`);
-  }
-  cdp.close();
+  console.log(JSON.stringify({ ...evidence, studioReadBack: publish.readBack ?? null }, null, 2));
 
   if (evidence.verified) {
     console.log("\nVERIFIED: one MetaMask-signed Arkiv publication, read back and byte-compared.");
