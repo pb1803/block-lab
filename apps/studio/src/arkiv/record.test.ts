@@ -1,4 +1,3 @@
-import type { ExperimentMetadata } from "@blocklab/arkiv-metadata";
 import { describe, expect, it } from "vitest";
 import {
   arkivRecordFromRow,
@@ -68,7 +67,7 @@ describe("arkivRecordFromRow", () => {
   });
 
   it("rejects a syntactically valid but non-canonical payload", () => {
-    const bytes = Buffer.from("  " + JSON.stringify(sampleMetadata()));
+    const bytes = Buffer.from(`  ${JSON.stringify(sampleMetadata())}`);
     const result = arkivRecordFromRow(
       makeRow({
         payload: { type: "bytes", value: `0x${bytes.toString("hex")}` },

@@ -93,6 +93,10 @@ export type ProxyOutcome =
   | "upstream_timeout"
   | "upstream_unavailable"
   | "injected_blackout"
+  | "injected_failure"
+  | "rate_limited"
+  | "injected_connection_failure"
+  | "injected_malformed_response"
   | "invalid_request"
   | "proxy_error";
 
@@ -105,6 +109,10 @@ export type ProxyErrorCategory =
   | "upstream_timeout"
   | "upstream_connection"
   | "injected_blackout"
+  | "injected_failure"
+  | "rate_limit"
+  | "connection_failure"
+  | "malformed_response"
   | "proxy";
 
 export interface RpcProxyEvidence {
@@ -121,6 +129,8 @@ export interface RpcProxyEvidence {
   readonly injectedDelayMs?: number;
   readonly upstreamOrigin: string;
   readonly errorCategory?: ProxyErrorCategory;
+  readonly faultMode?: string;
+  readonly httpStatus?: number;
 }
 
 export interface BlackoutConfig {
@@ -136,6 +146,47 @@ export interface LatencyConfig {
   readonly experimentDurationMs?: number;
 }
 
+export interface IntermittentFailureConfig {
+  readonly startOffsetMs: number;
+  readonly failureDurationMs: number;
+  readonly recoveryIntervalMs: number;
+  readonly windowCount: number;
+  readonly httpStatus?: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface RateLimitConfig {
+  readonly maxRequests: number;
+  readonly windowMs: number;
+  readonly cooldownMs?: number;
+  readonly retryAfterSeconds?: number;
+  readonly experimentDurationMs?: number;
+}
+
+export type ConnectionFailureMode = "connection-reset" | "premature-close";
+
+export interface ConnectionFailureConfig {
+  readonly faultMode: ConnectionFailureMode;
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
+export type MalformedResponseMode =
+  | "invalid-json"
+  | "missing-version"
+  | "missing-result-and-error"
+  | "missing-id"
+  | "mismatched-id"
+  | "invalid-structure";
+
+export interface MalformedResponseConfig {
+  readonly faultMode: MalformedResponseMode;
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
 export interface RpcProxyConfig {
   readonly upstreamUrl: string;
   readonly port?: number;
@@ -144,6 +195,10 @@ export interface RpcProxyConfig {
   readonly upstreamTimeoutMs?: number;
   readonly blackout?: BlackoutConfig;
   readonly latency?: LatencyConfig;
+  readonly intermittent?: IntermittentFailureConfig;
+  readonly rateLimit?: RateLimitConfig;
+  readonly connectionFailure?: ConnectionFailureConfig;
+  readonly malformed?: MalformedResponseConfig;
   readonly now?: () => number;
   readonly executionId?: string;
   readonly scenarioId?: string;
@@ -165,12 +220,52 @@ export interface RpcLatencyExecutionConfig {
   readonly proxy: RpcProxyConfig;
 }
 
+export interface RpcIntermittentFailureExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
+export interface RpcRateLimitExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
+export interface RpcConnectionFailureExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
+export interface RpcMalformedResponseExecutionConfig {
+  readonly execution: ExecutionConfig;
+  readonly proxy: RpcProxyConfig;
+}
+
 export type RpcBlackoutWorkload<T> = (
   proxy: RpcProxy,
   context: ExecutionContext,
 ) => T | Promise<T>;
 
 export type RpcLatencyWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+export type RpcIntermittentFailureWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+export type RpcRateLimitWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+export type RpcConnectionFailureWorkload<T> = (
+  proxy: RpcProxy,
+  context: ExecutionContext,
+) => T | Promise<T>;
+
+export type RpcMalformedResponseWorkload<T> = (
   proxy: RpcProxy,
   context: ExecutionContext,
 ) => T | Promise<T>;
@@ -390,6 +485,154 @@ function assertLatencyConfig(config: LatencyConfig): void {
   }
 }
 
+function assertIntermittentConfig(config: IntermittentFailureConfig): void {
+  if (
+    !Number.isInteger(config.startOffsetMs) ||
+    config.startOffsetMs < 0 ||
+    !Number.isInteger(config.failureDurationMs) ||
+    config.failureDurationMs <= 0 ||
+    !Number.isInteger(config.recoveryIntervalMs) ||
+    config.recoveryIntervalMs <= 0 ||
+    !Number.isInteger(config.windowCount) ||
+    config.windowCount <= 0
+  ) {
+    throw new PreflightError(
+      "Intermittent failure start offset must be non-negative; failure duration, recovery interval, and window count must be positive integers.",
+    );
+  }
+  if (
+    config.httpStatus !== undefined &&
+    (!Number.isInteger(config.httpStatus) ||
+      config.httpStatus < 400 ||
+      config.httpStatus > 599)
+  ) {
+    throw new PreflightError(
+      "Intermittent failure HTTP status must be a valid HTTP error code between 400 and 599.",
+    );
+  }
+  const totalSpan =
+    config.startOffsetMs +
+    config.windowCount * config.failureDurationMs +
+    (config.windowCount - 1) * config.recoveryIntervalMs;
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0 ||
+      totalSpan > config.experimentDurationMs)
+  ) {
+    throw new PreflightError(
+      "Intermittent failure windows must fit within the positive experiment duration.",
+    );
+  }
+}
+
+function assertRateLimitConfig(config: RateLimitConfig): void {
+  if (
+    !Number.isInteger(config.maxRequests) ||
+    config.maxRequests <= 0 ||
+    !Number.isInteger(config.windowMs) ||
+    config.windowMs <= 0
+  ) {
+    throw new PreflightError(
+      "Rate limit maxRequests and windowMs must be positive integers.",
+    );
+  }
+  if (
+    config.cooldownMs !== undefined &&
+    (!Number.isInteger(config.cooldownMs) || config.cooldownMs < 0)
+  ) {
+    throw new PreflightError(
+      "Rate limit cooldownMs must be a non-negative integer.",
+    );
+  }
+  if (
+    config.retryAfterSeconds !== undefined &&
+    (!Number.isInteger(config.retryAfterSeconds) ||
+      config.retryAfterSeconds <= 0)
+  ) {
+    throw new PreflightError(
+      "Rate limit retryAfterSeconds must be a positive integer.",
+    );
+  }
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0)
+  ) {
+    throw new PreflightError(
+      "Rate limit experiment duration must be a positive integer.",
+    );
+  }
+}
+
+function assertConnectionFailureConfig(config: ConnectionFailureConfig): void {
+  if (
+    config.faultMode !== "connection-reset" &&
+    config.faultMode !== "premature-close"
+  ) {
+    throw new PreflightError(
+      `Unsupported connection failure mode: ${String(config.faultMode)}.`,
+    );
+  }
+  if (
+    !Number.isInteger(config.startOffsetMs) ||
+    config.startOffsetMs < 0 ||
+    !Number.isInteger(config.durationMs) ||
+    config.durationMs <= 0
+  ) {
+    throw new PreflightError(
+      "Connection failure start offset must be non-negative and duration must be a positive integer.",
+    );
+  }
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0 ||
+      config.startOffsetMs + config.durationMs > config.experimentDurationMs)
+  ) {
+    throw new PreflightError(
+      "Connection failure fault window must fit within the positive experiment duration.",
+    );
+  }
+}
+
+const VALID_MALFORMED_MODES: readonly MalformedResponseMode[] = [
+  "invalid-json",
+  "missing-version",
+  "missing-result-and-error",
+  "missing-id",
+  "mismatched-id",
+  "invalid-structure",
+];
+
+function assertMalformedConfig(config: MalformedResponseConfig): void {
+  if (!VALID_MALFORMED_MODES.includes(config.faultMode)) {
+    throw new PreflightError(
+      `Unsupported malformed response mode: ${String(config.faultMode)}.`,
+    );
+  }
+  if (
+    !Number.isInteger(config.startOffsetMs) ||
+    config.startOffsetMs < 0 ||
+    !Number.isInteger(config.durationMs) ||
+    config.durationMs <= 0
+  ) {
+    throw new PreflightError(
+      "Malformed response start offset must be non-negative and duration must be a positive integer.",
+    );
+  }
+  if (
+    config.experimentDurationMs !== undefined &&
+    (!Number.isInteger(config.experimentDurationMs) ||
+      config.experimentDurationMs <= 0 ||
+      config.startOffsetMs + config.durationMs > config.experimentDurationMs)
+  ) {
+    throw new PreflightError(
+      "Malformed response fault window must fit within the positive experiment duration.",
+    );
+  }
+}
+
 function upstreamOrigin(upstreamUrl: string): string {
   try {
     const url = new URL(upstreamUrl);
@@ -448,6 +691,12 @@ export function preflightRpcProxy(config: RpcProxyConfig): void {
   }
   if (config.blackout !== undefined) assertBlackoutConfig(config.blackout);
   if (config.latency !== undefined) assertLatencyConfig(config.latency);
+  if (config.intermittent !== undefined)
+    assertIntermittentConfig(config.intermittent);
+  if (config.rateLimit !== undefined) assertRateLimitConfig(config.rateLimit);
+  if (config.connectionFailure !== undefined)
+    assertConnectionFailureConfig(config.connectionFailure);
+  if (config.malformed !== undefined) assertMalformedConfig(config.malformed);
 }
 
 function safeRequestId(value: unknown): string | number | null | undefined {
@@ -519,6 +768,8 @@ export class RpcProxy {
   private readonly activeRequests = new Set<AbortController>();
   private closePromise?: Promise<void>;
   private address?: RpcProxyAddress;
+  private currentRateLimitWindow = -1;
+  private currentRateLimitCount = 0;
 
   public constructor(config: RpcProxyConfig) {
     preflightRpcProxy(config);
@@ -532,6 +783,9 @@ export class RpcProxy {
     this.startedAt = (config.now ?? Date.now)();
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response);
+    });
+    this.server.on("clientError", (_error, socket) => {
+      socket.destroy();
     });
   }
 
@@ -612,6 +866,62 @@ export class RpcProxy {
     );
   }
 
+  private intermittentFailureActive(): boolean {
+    const intermittent = this.config.intermittent;
+    if (intermittent === undefined) return false;
+    const elapsed = this.currentTime() - this.startedAt;
+    if (elapsed < intermittent.startOffsetMs) return false;
+    const cycleTime =
+      intermittent.failureDurationMs + intermittent.recoveryIntervalMs;
+    const timeSinceFirst = elapsed - intermittent.startOffsetMs;
+    const windowIndex = Math.floor(timeSinceFirst / cycleTime);
+    if (windowIndex >= intermittent.windowCount) return false;
+    const offsetInCycle = timeSinceFirst % cycleTime;
+    return offsetInCycle < intermittent.failureDurationMs;
+  }
+
+  private rateLimitActive(): { throttled: boolean; retryAfter: number } {
+    const rateLimit = this.config.rateLimit;
+    if (rateLimit === undefined) return { throttled: false, retryAfter: 0 };
+    const elapsed = this.currentTime() - this.startedAt;
+    const windowIndex = Math.floor(elapsed / rateLimit.windowMs);
+    if (this.currentRateLimitWindow !== windowIndex) {
+      this.currentRateLimitWindow = windowIndex;
+      this.currentRateLimitCount = 0;
+    }
+    const retryAfter =
+      rateLimit.retryAfterSeconds ??
+      Math.max(
+        1,
+        Math.ceil((rateLimit.cooldownMs ?? rateLimit.windowMs) / 1000),
+      );
+    if (this.currentRateLimitCount >= rateLimit.maxRequests) {
+      return { throttled: true, retryAfter };
+    }
+    this.currentRateLimitCount += 1;
+    return { throttled: false, retryAfter: 0 };
+  }
+
+  private connectionFailureActive(): boolean {
+    const connectionFailure = this.config.connectionFailure;
+    if (connectionFailure === undefined) return false;
+    const elapsed = this.currentTime() - this.startedAt;
+    return (
+      elapsed >= connectionFailure.startOffsetMs &&
+      elapsed < connectionFailure.startOffsetMs + connectionFailure.durationMs
+    );
+  }
+
+  private malformedActive(): boolean {
+    const malformed = this.config.malformed;
+    if (malformed === undefined) return false;
+    const elapsed = this.currentTime() - this.startedAt;
+    return (
+      elapsed >= malformed.startOffsetMs &&
+      elapsed < malformed.startOffsetMs + malformed.durationMs
+    );
+  }
+
   private async delay(durationMs: number, signal: AbortSignal): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, durationMs);
@@ -638,6 +948,8 @@ export class RpcProxy {
     injected: boolean,
     errorCategory?: ProxyErrorCategory,
     injectedDelayMs?: number,
+    faultMode?: string,
+    httpStatus?: number,
   ): void {
     const record: RpcProxyEvidence = {
       executionId: this.config.executionId ?? "unattached",
@@ -653,6 +965,8 @@ export class RpcProxy {
       ...(request.id === undefined ? {} : { requestId: request.id }),
       ...(errorCategory === undefined ? {} : { errorCategory }),
       ...(injectedDelayMs === undefined ? {} : { injectedDelayMs }),
+      ...(faultMode === undefined ? {} : { faultMode }),
+      ...(httpStatus === undefined ? {} : { httpStatus }),
     };
     this.evidenceRecords.push(record);
   }
@@ -796,6 +1110,112 @@ export class RpcProxy {
       );
       return;
     }
+    if (this.intermittentFailureActive()) {
+      const httpStatus = this.config.intermittent?.httpStatus ?? 503;
+      this.record(
+        requestInfo,
+        "injected_failure",
+        started,
+        true,
+        "injected_failure",
+        undefined,
+        undefined,
+        httpStatus,
+      );
+      writeJson(
+        response,
+        httpStatus,
+        rpcError(
+          id ?? null,
+          -32097,
+          "BLOCKLAB injected intermittent RPC failure.",
+        ),
+      );
+      return;
+    }
+    const rateLimitResult = this.rateLimitActive();
+    if (rateLimitResult.throttled) {
+      this.record(requestInfo, "rate_limited", started, true, "rate_limit");
+      response.setHeader("Retry-After", String(rateLimitResult.retryAfter));
+      writeJson(
+        response,
+        429,
+        rpcError(
+          id ?? null,
+          -32005,
+          "BLOCKLAB injected RPC rate limit exceeded.",
+        ),
+      );
+      return;
+    }
+    if (this.connectionFailureActive()) {
+      const mode =
+        this.config.connectionFailure?.faultMode ?? "connection-reset";
+      this.record(
+        requestInfo,
+        "injected_connection_failure",
+        started,
+        true,
+        "connection_failure",
+        undefined,
+        mode,
+      );
+      const socket = request.socket ?? response.socket;
+      if (socket) {
+        socket.on("error", () => {});
+        if (mode === "premature-close") {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.write('{"jsonrpc":"2.0",');
+        }
+        socket.destroy();
+      }
+      return;
+    }
+    if (this.malformedActive()) {
+      const faultMode = this.config.malformed?.faultMode ?? "invalid-json";
+      this.record(
+        requestInfo,
+        "injected_malformed_response",
+        started,
+        true,
+        "malformed_response",
+        undefined,
+        faultMode,
+      );
+      let malformedBody: string;
+      switch (faultMode) {
+        case "invalid-json":
+          malformedBody = '{"jsonrpc": "2.0", broken';
+          break;
+        case "missing-version":
+          malformedBody = JSON.stringify({ id: id ?? 1, result: "0x1" });
+          break;
+        case "missing-result-and-error":
+          malformedBody = JSON.stringify({ jsonrpc: "2.0", id: id ?? 1 });
+          break;
+        case "missing-id":
+          malformedBody = JSON.stringify({ jsonrpc: "2.0", result: "0x1" });
+          break;
+        case "mismatched-id": {
+          const mismatchedId =
+            typeof id === "number"
+              ? id + 99_999
+              : `mismatched-${String(id ?? "none")}`;
+          malformedBody = JSON.stringify({
+            jsonrpc: "2.0",
+            id: mismatchedId,
+            result: "0x1",
+          });
+          break;
+        }
+        default:
+          malformedBody = JSON.stringify(["not-a-jsonrpc-object"]);
+          break;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(malformedBody);
+      return;
+    }
     const controller = new AbortController();
     this.activeRequests.add(controller);
     const latencyInjected = this.latencyActive();
@@ -923,6 +1343,126 @@ export function runRpcLatency<T>(
     parameters: {
       ...(config.execution.parameters ?? {}),
       ...(config.proxy.latency ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
+}
+
+export function runRpcIntermittentFailure<T>(
+  config: RpcIntermittentFailureExecutionConfig,
+  workload: RpcIntermittentFailureWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-intermittent-failure",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-intermittent-failure",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.intermittent ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
+}
+
+export function runRpcRateLimit<T>(
+  config: RpcRateLimitExecutionConfig,
+  workload: RpcRateLimitWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-rate-limit",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-rate-limit",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.rateLimit ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
+}
+
+export function runRpcConnectionFailure<T>(
+  config: RpcConnectionFailureExecutionConfig,
+  workload: RpcConnectionFailureWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-connection-failure",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-connection-failure",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.connectionFailure ?? {}),
+    },
+  };
+  preflightExecution(execution);
+  return startExecution(execution, async (context) => {
+    const proxy = new RpcProxy({
+      ...proxyConfig,
+      executionId: context.executionId,
+    });
+    await proxy.start();
+    context.registerCleanup("rpc-proxy", () => proxy.close());
+    return workload(proxy, context);
+  });
+}
+
+export function runRpcMalformedResponse<T>(
+  config: RpcMalformedResponseExecutionConfig,
+  workload: RpcMalformedResponseWorkload<T>,
+): ExecutionHandle<T> {
+  const proxyConfig: RpcProxyConfig = {
+    ...config.proxy,
+    scenarioId: "rpc-malformed-response",
+  };
+  preflightRpcProxy(proxyConfig);
+  const execution: ExecutionConfig = {
+    ...config.execution,
+    scenarioId: "rpc-malformed-response",
+    target: config.proxy.upstreamUrl,
+    parameters: {
+      ...(config.execution.parameters ?? {}),
+      ...(config.proxy.malformed ?? {}),
     },
   };
   preflightExecution(execution);

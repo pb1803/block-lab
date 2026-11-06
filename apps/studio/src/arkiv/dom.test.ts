@@ -483,8 +483,10 @@ describe("mountArkivCompare", () => {
     const [left, right] = find(container, (el) =>
       el.attrs["data-testid"]?.startsWith("sr-compare-"),
     );
-    left!.value = JSON.stringify(record.metadata);
-    right!.value = JSON.stringify(record.metadata);
+    const leftInput = left as HTMLInputElement;
+    const rightInput = right as HTMLInputElement;
+    leftInput.value = JSON.stringify(record.metadata);
+    rightInput.value = JSON.stringify(record.metadata);
     click(container, findByAction(container, "compare"));
     return tick().then(() => {
       const text = allText(findByTestId(container, "sr-compare-result"));
@@ -509,8 +511,10 @@ describe("mountArkivCompare", () => {
     const [left, right] = find(container, (el) =>
       el.attrs["data-testid"]?.startsWith("sr-compare-"),
     );
-    left!.value = record.entityKey;
-    right!.value = JSON.stringify(record.metadata);
+    const leftInput = left as HTMLInputElement;
+    const rightInput = right as HTMLInputElement;
+    leftInput.value = record.entityKey;
+    rightInput.value = JSON.stringify(record.metadata);
     click(container, findByAction(container, "compare"));
     await tick();
     expect(allText(findByTestId(container, "sr-compare-result"))).toContain(

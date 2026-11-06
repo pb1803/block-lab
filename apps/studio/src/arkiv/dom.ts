@@ -573,7 +573,7 @@ export function mountArkivCompare(
     result.append(summary);
     for (const row of model.rows) {
       const diffed = doc.createElement("div");
-      diffed.className = "sr-row" + (row.same ? "" : " diff");
+      diffed.className = `sr-row${row.same ? "" : " diff"}`;
       const labelNode = doc.createElement("span");
       labelNode.className = "sr-label";
       labelNode.textContent = `${row.group === "system" ? "(on-chain) " : ""}${row.label}`;

@@ -17,8 +17,6 @@ import type {
   StudioArkivState,
   StudioError,
 } from "./types.js";
-import { initialState } from "./types.js";
-
 export type ArkivEvent =
   | { readonly type: "wallet-missing" }
   | { readonly type: "wallet-disconnected" }

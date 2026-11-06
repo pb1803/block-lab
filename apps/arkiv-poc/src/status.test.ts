@@ -12,7 +12,7 @@ const ADDRESS_A = "0x1111111111111111111111111111111111111111" as Address;
 const ADDRESS_B = "0x2222222222222222222222222222222222222222" as Address;
 const RABDI = "0x76edaf" as Hex;
 const OTHER = "0x1" as Hex;
-const KEY = ("0x" + "ab".repeat(32)) as Hex;
+const KEY = `0x${"ab".repeat(32)}` as Hex;
 
 const META = {
   schemaVersion: "1.0" as const,

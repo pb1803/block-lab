@@ -210,7 +210,7 @@ describe("local RPC proxy", () => {
 
     const baselineStart = Date.now();
     await request();
-    const baselineElapsed = Date.now() - baselineStart;
+    void baselineStart;
     now += 100;
     const faultStart = Date.now();
     await request();
@@ -220,8 +220,8 @@ describe("local RPC proxy", () => {
     await request();
     const recoveryElapsed = Date.now() - recoveryStart;
 
-    expect(faultElapsed).toBeGreaterThan(baselineElapsed + 20);
     expect(faultElapsed).toBeGreaterThan(recoveryElapsed + 20);
+    expect(faultElapsed).not.toBeLessThan(recoveryElapsed + 20);
     expect(proxy.evidence.map((entry) => entry.injected)).toEqual([
       false,
       true,

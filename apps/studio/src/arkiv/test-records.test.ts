@@ -45,10 +45,8 @@ describe("test record profiles", () => {
     const { EXPERIMENT_ID, buildRecord } = await load("studio-mm-002");
     expect(EXPERIMENT_ID).toBe("studio-mm-002");
     const record = buildRecord();
-    expect(record["scenarioName"]).toContain("ARK-05");
-    expect(record["evidenceRef"]).toBe(
-      "evidence/studio-mm-002/transfer-test.md",
-    );
+    expect(record.scenarioName).toContain("ARK-05");
+    expect(record.evidenceRef).toBe("evidence/studio-mm-002/transfer-test.md");
     // Distinct from every other record, so a run can never be mistaken for one.
     expect(sha256(metadataToPayloadBytes(record))).toBe(
       "dfe87f08922439924f3df6f8f34d1e4ec1a369da54c9cc707a3f5a7653391f9d",

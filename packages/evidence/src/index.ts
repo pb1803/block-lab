@@ -13,6 +13,10 @@ import type { ExperimentResult } from "@blocklab/core";
 export const EVIDENCE_SCHEMA_VERSION = "1.0" as const;
 export const RPC_BLACKOUT_SCENARIO_VERSION = "1.0.0" as const;
 export const RPC_LATENCY_SCENARIO_VERSION = "1.0.0" as const;
+export const RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION = "1.0.0" as const;
+export const RPC_RATE_LIMIT_SCENARIO_VERSION = "1.0.0" as const;
+export const RPC_CONNECTION_FAILURE_SCENARIO_VERSION = "1.0.0" as const;
+export const RPC_MALFORMED_RESPONSE_SCENARIO_VERSION = "1.0.0" as const;
 
 export type EvidencePhase = "baseline" | "fault" | "recovery";
 export type EvaluationStatus = "passed" | "failed" | "inconclusive";
@@ -45,6 +49,43 @@ export interface BlackoutSchedule {
 
 export interface LatencySchedule {
   readonly delayMs: number;
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface IntermittentFailureSchedule {
+  readonly startOffsetMs: number;
+  readonly failureDurationMs: number;
+  readonly recoveryIntervalMs: number;
+  readonly windowCount: number;
+  readonly experimentDurationMs?: number;
+  readonly httpStatus?: number;
+}
+
+export interface RateLimitSchedule {
+  readonly maxRequests: number;
+  readonly windowMs: number;
+  readonly cooldownMs?: number;
+  readonly retryAfterSeconds?: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface ConnectionFailureSchedule {
+  readonly faultMode: "connection-reset" | "premature-close";
+  readonly startOffsetMs: number;
+  readonly durationMs: number;
+  readonly experimentDurationMs?: number;
+}
+
+export interface MalformedResponseSchedule {
+  readonly faultMode:
+    | "invalid-json"
+    | "missing-version"
+    | "missing-result-and-error"
+    | "missing-id"
+    | "mismatched-id"
+    | "invalid-structure";
   readonly startOffsetMs: number;
   readonly durationMs: number;
   readonly experimentDurationMs?: number;
@@ -132,7 +173,89 @@ export interface RpcLatencyEvidence {
   readonly limitations: readonly string[];
 }
 
-export type EvidenceRecord = RpcBlackoutEvidence | RpcLatencyEvidence;
+export interface RpcIntermittentFailureEvidence {
+  readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
+  readonly recordId: string;
+  readonly executionId: string;
+  readonly scenarioId: "rpc-intermittent-failure";
+  readonly scenarioVersion: typeof RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION;
+  readonly configuration: IntermittentFailureSchedule;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly terminalState: TerminalState;
+  readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
+  readonly evaluation: ExperimentEvaluation;
+  readonly warnings: readonly string[];
+  readonly limitations: readonly string[];
+}
+
+export interface RpcRateLimitEvidence {
+  readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
+  readonly recordId: string;
+  readonly executionId: string;
+  readonly scenarioId: "rpc-rate-limit";
+  readonly scenarioVersion: typeof RPC_RATE_LIMIT_SCENARIO_VERSION;
+  readonly configuration: RateLimitSchedule;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly terminalState: TerminalState;
+  readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
+  readonly evaluation: ExperimentEvaluation;
+  readonly warnings: readonly string[];
+  readonly limitations: readonly string[];
+}
+
+export interface RpcConnectionFailureEvidence {
+  readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
+  readonly recordId: string;
+  readonly executionId: string;
+  readonly scenarioId: "rpc-connection-failure";
+  readonly scenarioVersion: typeof RPC_CONNECTION_FAILURE_SCENARIO_VERSION;
+  readonly configuration: ConnectionFailureSchedule;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly terminalState: TerminalState;
+  readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
+  readonly evaluation: ExperimentEvaluation;
+  readonly warnings: readonly string[];
+  readonly limitations: readonly string[];
+}
+
+export interface RpcMalformedResponseEvidence {
+  readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
+  readonly recordId: string;
+  readonly executionId: string;
+  readonly scenarioId: "rpc-malformed-response";
+  readonly scenarioVersion: typeof RPC_MALFORMED_RESPONSE_SCENARIO_VERSION;
+  readonly configuration: MalformedResponseSchedule;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly terminalState: TerminalState;
+  readonly observations: readonly EvidenceObservation[];
+  readonly evidenceDigest: string;
+  readonly evaluation: ExperimentEvaluation;
+  readonly warnings: readonly string[];
+  readonly limitations: readonly string[];
+}
+
+export type EvidenceSchedule =
+  | BlackoutSchedule
+  | LatencySchedule
+  | IntermittentFailureSchedule
+  | RateLimitSchedule
+  | ConnectionFailureSchedule
+  | MalformedResponseSchedule;
+
+export type EvidenceRecord =
+  | RpcBlackoutEvidence
+  | RpcLatencyEvidence
+  | RpcIntermittentFailureEvidence
+  | RpcRateLimitEvidence
+  | RpcConnectionFailureEvidence
+  | RpcMalformedResponseEvidence;
 
 export interface ProxyEvidenceLike {
   readonly executionId: string;
@@ -157,17 +280,29 @@ export interface EvidenceExecutionLike {
 
 export interface ReplayConfiguration {
   readonly schemaVersion: typeof EVIDENCE_SCHEMA_VERSION;
-  readonly scenarioId: "rpc-blackout";
-  readonly scenarioVersion: typeof RPC_BLACKOUT_SCENARIO_VERSION;
-  readonly configuration: BlackoutSchedule;
+  readonly scenarioId:
+    | "rpc-blackout"
+    | "rpc-latency"
+    | "rpc-intermittent-failure"
+    | "rpc-rate-limit"
+    | "rpc-connection-failure"
+    | "rpc-malformed-response";
+  readonly scenarioVersion:
+    | typeof RPC_BLACKOUT_SCENARIO_VERSION
+    | typeof RPC_LATENCY_SCENARIO_VERSION
+    | typeof RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION
+    | typeof RPC_RATE_LIMIT_SCENARIO_VERSION
+    | typeof RPC_CONNECTION_FAILURE_SCENARIO_VERSION
+    | typeof RPC_MALFORMED_RESPONSE_SCENARIO_VERSION;
+  readonly configuration: EvidenceSchedule;
 }
 
 export interface ReplayRequest {
   readonly replayId: string;
   readonly executionId: string;
-  readonly scenarioId: "rpc-blackout";
-  readonly scenarioVersion: typeof RPC_BLACKOUT_SCENARIO_VERSION;
-  readonly configuration: BlackoutSchedule;
+  readonly scenarioId: ReplayConfiguration["scenarioId"];
+  readonly scenarioVersion: ReplayConfiguration["scenarioVersion"];
+  readonly configuration: EvidenceSchedule;
 }
 
 export interface ComparisonMetric {
@@ -278,6 +413,112 @@ function assertLatencySchedule(
   }
 }
 
+function assertIntermittentFailureSchedule(
+  schedule: unknown,
+): asserts schedule is IntermittentFailureSchedule {
+  if (!isObject(schedule)) {
+    throw new EvidenceValidationError(
+      "Intermittent failure configuration is required.",
+    );
+  }
+  const { startOffsetMs, failureDurationMs, recoveryIntervalMs, windowCount } =
+    schedule;
+  if (
+    typeof startOffsetMs !== "number" ||
+    !Number.isInteger(startOffsetMs) ||
+    startOffsetMs < 0 ||
+    typeof failureDurationMs !== "number" ||
+    !Number.isInteger(failureDurationMs) ||
+    failureDurationMs <= 0 ||
+    typeof recoveryIntervalMs !== "number" ||
+    !Number.isInteger(recoveryIntervalMs) ||
+    recoveryIntervalMs <= 0 ||
+    typeof windowCount !== "number" ||
+    !Number.isInteger(windowCount) ||
+    windowCount <= 0
+  ) {
+    throw new EvidenceValidationError(
+      "Intermittent failure schedule must have valid integer window parameters.",
+    );
+  }
+}
+
+function assertRateLimitSchedule(
+  schedule: unknown,
+): asserts schedule is RateLimitSchedule {
+  if (!isObject(schedule)) {
+    throw new EvidenceValidationError("Rate limit configuration is required.");
+  }
+  const { maxRequests, windowMs } = schedule;
+  if (
+    typeof maxRequests !== "number" ||
+    !Number.isInteger(maxRequests) ||
+    maxRequests <= 0 ||
+    typeof windowMs !== "number" ||
+    !Number.isInteger(windowMs) ||
+    windowMs <= 0
+  ) {
+    throw new EvidenceValidationError(
+      "Rate limit configuration must define valid integer maxRequests and windowMs.",
+    );
+  }
+}
+
+function assertConnectionFailureSchedule(
+  schedule: unknown,
+): asserts schedule is ConnectionFailureSchedule {
+  if (!isObject(schedule)) {
+    throw new EvidenceValidationError(
+      "Connection failure configuration is required.",
+    );
+  }
+  const { faultMode, startOffsetMs, durationMs } = schedule;
+  if (
+    (faultMode !== "connection-reset" && faultMode !== "premature-close") ||
+    typeof startOffsetMs !== "number" ||
+    !Number.isInteger(startOffsetMs) ||
+    startOffsetMs < 0 ||
+    typeof durationMs !== "number" ||
+    !Number.isInteger(durationMs) ||
+    durationMs <= 0
+  ) {
+    throw new EvidenceValidationError(
+      "Connection failure configuration must include a valid fault mode and positive duration.",
+    );
+  }
+}
+
+function assertMalformedResponseSchedule(
+  schedule: unknown,
+): asserts schedule is MalformedResponseSchedule {
+  if (!isObject(schedule)) {
+    throw new EvidenceValidationError(
+      "Malformed response configuration is required.",
+    );
+  }
+  const { faultMode, startOffsetMs, durationMs } = schedule;
+  if (
+    ![
+      "invalid-json",
+      "missing-version",
+      "missing-result-and-error",
+      "missing-id",
+      "mismatched-id",
+      "invalid-structure",
+    ].includes(String(faultMode)) ||
+    typeof startOffsetMs !== "number" ||
+    !Number.isInteger(startOffsetMs) ||
+    startOffsetMs < 0 ||
+    typeof durationMs !== "number" ||
+    !Number.isInteger(durationMs) ||
+    durationMs <= 0
+  ) {
+    throw new EvidenceValidationError(
+      "Malformed response configuration must include a valid mode and positive window.",
+    );
+  }
+}
+
 function assertObservation(
   value: unknown,
   index: number,
@@ -338,15 +579,45 @@ export function validateEvidence(
       (value.scenarioId === "rpc-blackout" &&
         value.scenarioVersion === RPC_BLACKOUT_SCENARIO_VERSION) ||
       (value.scenarioId === "rpc-latency" &&
-        value.scenarioVersion === RPC_LATENCY_SCENARIO_VERSION)
+        value.scenarioVersion === RPC_LATENCY_SCENARIO_VERSION) ||
+      (value.scenarioId === "rpc-intermittent-failure" &&
+        value.scenarioVersion === RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION) ||
+      (value.scenarioId === "rpc-rate-limit" &&
+        value.scenarioVersion === RPC_RATE_LIMIT_SCENARIO_VERSION) ||
+      (value.scenarioId === "rpc-connection-failure" &&
+        value.scenarioVersion === RPC_CONNECTION_FAILURE_SCENARIO_VERSION) ||
+      (value.scenarioId === "rpc-malformed-response" &&
+        value.scenarioVersion === RPC_MALFORMED_RESPONSE_SCENARIO_VERSION)
     )
   ) {
     throw new EvidenceValidationError(
       "Unsupported or incomplete scenario identity.",
     );
   }
-  if (value.scenarioId === "rpc-blackout") assertSchedule(value.configuration);
-  else assertLatencySchedule(value.configuration);
+  switch (value.scenarioId) {
+    case "rpc-blackout":
+      assertSchedule(value.configuration);
+      break;
+    case "rpc-latency":
+      assertLatencySchedule(value.configuration);
+      break;
+    case "rpc-intermittent-failure":
+      assertIntermittentFailureSchedule(value.configuration);
+      break;
+    case "rpc-rate-limit":
+      assertRateLimitSchedule(value.configuration);
+      break;
+    case "rpc-connection-failure":
+      assertConnectionFailureSchedule(value.configuration);
+      break;
+    case "rpc-malformed-response":
+      assertMalformedResponseSchedule(value.configuration);
+      break;
+    default:
+      throw new EvidenceValidationError(
+        `Unsupported scenario id: ${String(value.scenarioId)}.`,
+      );
+  }
   assertTimestamp(value.startedAt, "startedAt");
   assertTimestamp(value.finishedAt, "finishedAt");
   if (Date.parse(value.finishedAt) < Date.parse(value.startedAt)) {
@@ -896,21 +1167,198 @@ export function createRpcLatencyEvidence(
   return evidence;
 }
 
+export function createRpcIntermittentFailureEvidence(
+  execution: EvidenceExecutionLike,
+  schedule: IntermittentFailureSchedule,
+  records: readonly ProxyEvidenceLike[],
+  options: {
+    readonly scenarioVersion?: string;
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  } = {},
+): RpcIntermittentFailureEvidence {
+  const blackoutLike = {
+    startOffsetMs: schedule.startOffsetMs,
+    durationMs: schedule.failureDurationMs,
+    ...(schedule.experimentDurationMs === undefined
+      ? {}
+      : { experimentDurationMs: schedule.experimentDurationMs }),
+  } satisfies Partial<BlackoutSchedule>;
+  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
+    ...options,
+    scenarioVersion:
+      options.scenarioVersion ?? RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+  });
+  return {
+    ...evidence,
+    scenarioId: "rpc-intermittent-failure",
+    scenarioVersion: RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+    configuration: schedule,
+    warnings: options.warnings ?? evidence.warnings,
+    limitations: options.limitations ?? [
+      "Evaluation proves proxy/request fault timing, not application resilience.",
+    ],
+  } as RpcIntermittentFailureEvidence;
+}
+
+export function createRpcRateLimitEvidence(
+  execution: EvidenceExecutionLike,
+  schedule: RateLimitSchedule,
+  records: readonly ProxyEvidenceLike[],
+  options: {
+    readonly scenarioVersion?: string;
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  } = {},
+): RpcRateLimitEvidence {
+  const blackoutLike = {
+    startOffsetMs: 0,
+    durationMs: 1,
+    ...(schedule.experimentDurationMs === undefined
+      ? {}
+      : { experimentDurationMs: schedule.experimentDurationMs }),
+  } satisfies Partial<BlackoutSchedule>;
+  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
+    ...options,
+    scenarioVersion: options.scenarioVersion ?? RPC_RATE_LIMIT_SCENARIO_VERSION,
+  });
+  return {
+    ...evidence,
+    scenarioId: "rpc-rate-limit",
+    scenarioVersion: RPC_RATE_LIMIT_SCENARIO_VERSION,
+    configuration: schedule,
+    warnings: options.warnings ?? evidence.warnings,
+    limitations: options.limitations ?? [
+      "Evaluation proves rate-limit behavior observed by the proxy, not application-level resilience.",
+    ],
+  } as RpcRateLimitEvidence;
+}
+
+export function createRpcConnectionFailureEvidence(
+  execution: EvidenceExecutionLike,
+  schedule: ConnectionFailureSchedule,
+  records: readonly ProxyEvidenceLike[],
+  options: {
+    readonly scenarioVersion?: string;
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  } = {},
+): RpcConnectionFailureEvidence {
+  const blackoutLike = {
+    startOffsetMs: schedule.startOffsetMs,
+    durationMs: schedule.durationMs,
+    ...(schedule.experimentDurationMs === undefined
+      ? {}
+      : { experimentDurationMs: schedule.experimentDurationMs }),
+  } satisfies Partial<BlackoutSchedule>;
+  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
+    ...options,
+    scenarioVersion:
+      options.scenarioVersion ?? RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
+  });
+  return {
+    ...evidence,
+    scenarioId: "rpc-connection-failure",
+    scenarioVersion: RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
+    configuration: schedule,
+    warnings: options.warnings ?? evidence.warnings,
+    limitations: options.limitations ?? [
+      "Evaluation proves proxy transport failure timing, not application resilience to network instability.",
+    ],
+  } as RpcConnectionFailureEvidence;
+}
+
+export function createRpcMalformedResponseEvidence(
+  execution: EvidenceExecutionLike,
+  schedule: MalformedResponseSchedule,
+  records: readonly ProxyEvidenceLike[],
+  options: {
+    readonly scenarioVersion?: string;
+    readonly recordId?: string;
+    readonly warnings?: readonly string[];
+    readonly limitations?: readonly string[];
+  } = {},
+): RpcMalformedResponseEvidence {
+  const blackoutLike = {
+    startOffsetMs: schedule.startOffsetMs,
+    durationMs: schedule.durationMs,
+    ...(schedule.experimentDurationMs === undefined
+      ? {}
+      : { experimentDurationMs: schedule.experimentDurationMs }),
+  } satisfies Partial<BlackoutSchedule>;
+  const evidence = createRpcBlackoutEvidence(execution, blackoutLike, records, {
+    ...options,
+    scenarioVersion:
+      options.scenarioVersion ?? RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
+  });
+  return {
+    ...evidence,
+    scenarioId: "rpc-malformed-response",
+    scenarioVersion: RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
+    configuration: schedule,
+    warnings: options.warnings ?? evidence.warnings,
+    limitations: options.limitations ?? [
+      "Evaluation proves malformed protocol behavior at the proxy boundary, not downstream application correctness.",
+    ],
+  } as RpcMalformedResponseEvidence;
+}
+
 export function toReplayConfiguration(
   evidence: EvidenceRecord,
 ): ReplayConfiguration {
   validateEvidence(evidence);
-  if (evidence.scenarioId !== "rpc-blackout") {
-    throw new EvidenceValidationError(
-      "Only rpc-blackout evidence supports the legacy replay configuration.",
-    );
+  const scenarioId = evidence.scenarioId as ReplayConfiguration["scenarioId"];
+  switch (scenarioId) {
+    case "rpc-blackout":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-blackout",
+        scenarioVersion: RPC_BLACKOUT_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    case "rpc-latency":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-latency",
+        scenarioVersion: RPC_LATENCY_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    case "rpc-intermittent-failure":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-intermittent-failure",
+        scenarioVersion: RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    case "rpc-rate-limit":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-rate-limit",
+        scenarioVersion: RPC_RATE_LIMIT_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    case "rpc-connection-failure":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-connection-failure",
+        scenarioVersion: RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    case "rpc-malformed-response":
+      return {
+        schemaVersion: EVIDENCE_SCHEMA_VERSION,
+        scenarioId: "rpc-malformed-response",
+        scenarioVersion: RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
+        configuration: evidence.configuration,
+      };
+    default:
+      throw new EvidenceValidationError(
+        `Unsupported scenario for replay configuration: ${String(scenarioId)}.`,
+      );
   }
-  return {
-    schemaVersion: EVIDENCE_SCHEMA_VERSION,
-    scenarioId: "rpc-blackout",
-    scenarioVersion: RPC_BLACKOUT_SCENARIO_VERSION,
-    configuration: evidence.configuration,
-  };
 }
 
 export function replayConfiguration(value: unknown): ReplayRequest {
@@ -919,32 +1367,135 @@ export function replayConfiguration(value: unknown): ReplayRequest {
       "Unsupported replay evidence schema version.",
     );
   }
-  if (
-    value.scenarioId !== "rpc-blackout" ||
-    value.scenarioVersion !== RPC_BLACKOUT_SCENARIO_VERSION
-  ) {
-    throw new EvidenceValidationError("Unsupported replay scenario version.");
+  const scenarioVersion =
+    typeof value.scenarioVersion === "string"
+      ? value.scenarioVersion
+      : undefined;
+  switch (value.scenarioId) {
+    case "rpc-blackout":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_BLACKOUT_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertSchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-blackout",
+        scenarioVersion: scenarioVersion ?? RPC_BLACKOUT_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    case "rpc-latency":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_LATENCY_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertLatencySchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-latency",
+        scenarioVersion: scenarioVersion ?? RPC_LATENCY_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    case "rpc-intermittent-failure":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertIntermittentFailureSchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-intermittent-failure",
+        scenarioVersion:
+          scenarioVersion ?? RPC_INTERMITTENT_FAILURE_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    case "rpc-rate-limit":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_RATE_LIMIT_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertRateLimitSchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-rate-limit",
+        scenarioVersion: scenarioVersion ?? RPC_RATE_LIMIT_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    case "rpc-connection-failure":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_CONNECTION_FAILURE_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertConnectionFailureSchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-connection-failure",
+        scenarioVersion:
+          scenarioVersion ?? RPC_CONNECTION_FAILURE_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    case "rpc-malformed-response":
+      if (
+        scenarioVersion !== undefined &&
+        scenarioVersion !== RPC_MALFORMED_RESPONSE_SCENARIO_VERSION
+      ) {
+        throw new EvidenceValidationError(
+          "Unsupported replay scenario version.",
+        );
+      }
+      assertMalformedResponseSchedule(value.configuration);
+      return {
+        replayId: randomUUID(),
+        executionId: randomUUID(),
+        scenarioId: "rpc-malformed-response",
+        scenarioVersion:
+          scenarioVersion ?? RPC_MALFORMED_RESPONSE_SCENARIO_VERSION,
+        configuration: value.configuration,
+      };
+    default:
+      throw new EvidenceValidationError("Unsupported replay scenario version.");
   }
-  assertSchedule(value.configuration);
-  return {
-    replayId: randomUUID(),
-    executionId: randomUUID(),
-    scenarioId: "rpc-blackout",
-    scenarioVersion: RPC_BLACKOUT_SCENARIO_VERSION,
-    configuration: value.configuration,
-  };
 }
 
-function configEqual(
-  left: BlackoutSchedule | LatencySchedule,
-  right: BlackoutSchedule | LatencySchedule,
-): boolean {
+function configEqual(left: EvidenceSchedule, right: EvidenceSchedule): boolean {
+  const leftMap = left as unknown as Record<string, unknown>;
+  const rightMap = right as unknown as Record<string, unknown>;
   return (
-    left.startOffsetMs === right.startOffsetMs &&
-    left.durationMs === right.durationMs &&
-    left.experimentDurationMs === right.experimentDurationMs &&
-    ("delayMs" in left ? left.delayMs : undefined) ===
-      ("delayMs" in right ? right.delayMs : undefined)
+    leftMap.startOffsetMs === rightMap.startOffsetMs &&
+    leftMap.durationMs === rightMap.durationMs &&
+    leftMap.experimentDurationMs === rightMap.experimentDurationMs &&
+    leftMap.delayMs === rightMap.delayMs &&
+    leftMap.failureDurationMs === rightMap.failureDurationMs &&
+    leftMap.recoveryIntervalMs === rightMap.recoveryIntervalMs &&
+    leftMap.windowCount === rightMap.windowCount &&
+    leftMap.maxRequests === rightMap.maxRequests &&
+    leftMap.windowMs === rightMap.windowMs &&
+    leftMap.faultMode === rightMap.faultMode
   );
 }
 

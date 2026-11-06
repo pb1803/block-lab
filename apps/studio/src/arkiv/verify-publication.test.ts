@@ -39,7 +39,7 @@ function input(overrides: Record<string, unknown> = {}) {
     canonical: metadata,
     receipt: RECEIPT,
     foundByExperimentId: ENTITY_KEY,
-    txHash: "0x" + "11".repeat(32),
+    txHash: `0x${"11".repeat(32)}`,
     explorerBase: "https://rabdi.explorer.arkiv.network/",
     ...overrides,
   };
@@ -140,7 +140,7 @@ describe("buildPublicationEvidence", () => {
 
   it("fails when the entity is not findable by experimentId", async () => {
     const evidence = await buildPublicationEvidence(
-      input({ foundByExperimentId: "0x" + "bb".repeat(32) }),
+      input({ foundByExperimentId: `0x${"bb".repeat(32)}` }),
     );
     expect(evidence.findableByExperimentId).toBe(false);
     expect(evidence.verified).toBe(false);
@@ -154,7 +154,7 @@ describe("buildPublicationEvidence", () => {
 
   it("fails when the entity key does not match the published key", async () => {
     const evidence = await buildPublicationEvidence(
-      input({ entityKey: "0x" + "cc".repeat(32) }),
+      input({ entityKey: `0x${"cc".repeat(32)}` }),
     );
     expect(evidence.verified).toBe(false);
     expect(evidence.checks.find((c) => c.name.includes("entity key"))?.ok).toBe(
@@ -180,7 +180,7 @@ describe("helpers", () => {
   it("compares payload bytes to a record", () => {
     expect(payloadMatchesRecord(payloadHex(), sampleMetadata())).toBe(true);
     const altered = makeRow({
-      payload: { type: "bytes", value: payloadHex().slice(0, -2) + "00" },
+      payload: { type: "bytes", value: `${payloadHex().slice(0, -2)}00` },
     });
     const hex = altered.payload?.value;
     expect(
