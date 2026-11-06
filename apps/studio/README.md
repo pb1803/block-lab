@@ -122,8 +122,10 @@ panel adds exactly one write path (Publish), and only from an explicit click.
 
 ### Boundaries (unchanged core rules)
 
-- `@arkiv-network/sdk` is imported by exactly one module, `src/arkiv/gateway.ts`.
-  Everything else talks to the `ArkivGateway` interface.
+- The `@arkiv-network/sdk` client/transport is imported by exactly one module,
+  `src/arkiv/gateway.ts`; the schema builder subpath (`/schema`, no client) is
+  imported only by `src/arkiv/schema.ts`. Everything else talks to the
+  `ArkivGateway` interface.
 - `@blocklab/arkiv-metadata` is the only record contract: every payload written
   or read is validated against it and encoded canonically
   (`metadataToPayloadBytes`). A read that fails validation is reported as

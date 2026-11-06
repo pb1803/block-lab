@@ -102,9 +102,11 @@ its own browser path over the same contract (below).
 write/query/retrieve run existed (`poc-write-001`, verified in
 [arkiv-poc.md](arkiv-poc.md)). Boundaries:
 
-- `gateway.ts` is the only module in Studio that imports `@arkiv-network/sdk`.
-  Everything else depends on the small `ArkivGateway` interface (find, publish,
-  read, query, current block), which is what tests substitute.
+- The SDK's client/transport surface is imported only by `gateway.ts`; the
+  dependency-free schema builder subpath (`@arkiv-network/sdk/schema`) is imported
+  only by `schema.ts` to declare columns. Everything else depends on the small
+  `ArkivGateway` interface (find, publish, read, query, current block), which is
+  what tests substitute.
 - `@blocklab/arkiv-metadata` stays the single record contract: the browser writes
   canonical payload bytes produced by `metadataToPayloadBytes`, and an entity that
   does not re-validate (or does not round-trip byte-for-byte) is rejected as
