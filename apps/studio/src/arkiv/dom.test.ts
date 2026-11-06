@@ -535,11 +535,16 @@ describe("mountStudioArkiv — ownership transfer", () => {
         publishExperiment: async () => {
           throw new Error("unused");
         },
-        readRecord: async () => record,
+        // Once the transfer has happened the chain reports B as the owner.
+        readRecord: async () =>
+          calls.transfer > 0
+            ? { ...record, owner: NEW_OWNER as `0x${string}` }
+            : record,
         queryBy: async () => [],
         currentBlock: async () => 269_199n,
         readOwnership: async () => ({
-          owner: record.owner,
+          owner:
+            calls.transfer > 0 ? (NEW_OWNER as `0x${string}`) : record.owner,
           creator: record.creator,
           expiresAtBlock: record.expiresAtBlock,
           payloadHex: "0x7b7d",
@@ -625,6 +630,25 @@ describe("mountStudioArkiv — ownership transfer", () => {
     await tick();
     expect(controller.state.transfer.phase).toBe("idle");
     expect(findByAction(container, "transfer-confirm").hidden).toBe(true);
+  });
+
+  it("refreshes the role line after a confirmed transfer", async () => {
+    const { container } = await mounted();
+    findByTestId(container, "sr-transfer-input").value = NEW_OWNER;
+    click(container, findByAction(container, "transfer-preview"));
+    await tick();
+    click(container, findByAction(container, "transfer-confirm"));
+    await tick();
+    await tick();
+    await tick();
+    expect(findByTestId(container, "sr-transfer-role").textContent).toMatch(
+      /no longer its owner/,
+    );
+    expect(
+      findByTestId(container, "sr-detail-rows").children.some((row) =>
+        JSON.stringify(row).includes(NEW_OWNER),
+      ),
+    ).toBe(true);
   });
 
   it("confirms exactly once on click", async () => {

@@ -382,15 +382,20 @@ export class ArkivController {
         );
         return;
       }
+      const readBack = compareOwnership(before, after, newOwner);
       this.#emit(
         {
           type: "transfer-confirmed",
           txHash,
           after,
-          readBack: compareOwnership(before, after, newOwner),
+          readBack,
         },
         generation,
       );
+      // The detail panel still describes the pre-transfer entity, so the role
+      // line would keep claiming ownership. Re-open it (read-only) to show the
+      // owner the chain now reports.
+      if (readBack.ok) await this.openRecord(before.entityKey);
     } catch (error) {
       // Never re-sign: re-read once and say what the chain shows now.
       const after = await gateway

@@ -1,11 +1,10 @@
 # ARK-05 — owner, creator and ownership transfer
 
-**Status: PARTIAL — entity created, transfer preview-staged.** The mechanism is fully
+**Status: DONE (2026-11-07).** The mechanism is fully
 verified from the installed SDK, fully implemented and unit-tested in Studio, and
-stage 1 (creation with A) is executed and independently verified, stage 2 (the
-transfer) is not. **No transfer has been broadcast yet**, so the two-wallet
-ownership behaviour itself is still unobserved. ARK-05 stays PARTIAL until
-stage 2 is recorded here.
+Both stages ran on chain and were verified: creation (stage 1) and the
+ownership transfer to B (stage 2), with `creator` observed to stay fixed while
+`owner` moved. Remaining caveats are stated in the Result section.
 
 Stage 1 wrote exactly one new entity (`studio-mm-002`). `poc-write-001` and
 `studio-mm-001` were neither modified, transferred, re-published nor reused as
@@ -270,54 +269,74 @@ pnpm --filter @blocklab/studio run verify:entity --   --entity 0x2b81eff4711b9f5
 
 `--record` adds the byte-identity check; without it that line reports FAIL by
 design ("no canonical record supplied"), which is why it is not shown as evidence.
+The canonical record is committed at [records/studio-mm-002.json](records/studio-mm-002.json),
+so `--record docs/records/studio-mm-002.json` reproduces the byte-identity check.
 
-### Stage 2 — transfer to B: PREVIEW STAGED, awaiting authorization
+### Stage 2 — transfer to B: DONE (2026-11-07)
 
-Studio was driven against the live entity: opened by key, B pasted, **Preview
-transfer** pressed. Nothing was signed, nothing was sent, no second entity exists.
-The preview was verified a second time from a separate process.
+Executed under explicit authorization. Exactly **one** `changeOwnership`, one
+MetaMask approval by A, one mined receipt, then three independent read-backs and
+a negative check. No second transfer, no retry, no new entity.
 
-Rendered preview (verbatim from the panel):
-
-| Row | Value |
+| Field | Value |
 |---|---|
-| Entity | `0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb` |
-| Creator (unchanged) | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` |
-| Owner now | `0xD431714db82331B07697Ea4675334C3AF6d2EBE9` |
-| Owner after | `0xAd797f58aFD3265C00504382171eC0818262D3ca` |
-| Signer (must be the owner) | `0xd431714db82331b07697ea4675334c3af6d2ebe9` |
-| Your role | owner and creator |
-| Expiry (unchanged) | block `588211` |
-| Payload (unchanged) | 496 bytes retained |
+| Entity key | `0x2b81eff4711b9f5bf4afccf0c427bdd0e5ebad9ebc0dd62e4495b5b016c4b1eb` |
+| Transfer tx / signer | `0x6841af346abad920eed03a071d7166fcec6bd0bdbb2f10d7fe6a298e975f0279` / `0xD431…2EBE9` (A) |
+| Transfer block / receipt | `286209`, status `success`, nonce `3`, `to` the Arkiv contract `0x4400…0044` |
+| Gas | `41086` × `1 gwei` = `0.000041086 tGLM` (A: `4.999593659` → `4.999552573`; B unchanged `9.999441629`) |
+| Owner before → after | `0xD431…2EBE9` → `0xAd79…D3ca` |
+| Creator before → after | `0xD431…2EBE9` → `0xD431…2EBE9` (**unchanged**) |
+| Payload before → after | 496 bytes, SHA-256 `dfe87f08…3391f9d` (**unchanged**) |
+| Expiry before → after | block `588211` (**unchanged**) |
+| `OwnershipTransferred` decoded | topic0 matches the SDK `ENTITY_EVENTS_ABI` selector, args `{ entityKey, previousOwner: A, newOwner: B }` (see below) |
+| Negative check (A cannot transfer) | PASS — re-preview as A reads the live entity, reports "you created this entity but are no longer its owner", and shows no prompt |
 
-All four caveats are shown by the panel: the creator never changes and only the
-owner does; the recipient does not accept (the transfer completes when mined); the
-account loses owner rights afterwards and can no longer transfer or patch the
-entity; expiry and payload are untouched and the entity stays world-readable.
+**Decoded `OwnershipTransferred` event** (from the transfer receipt via the SDK's
+own `ENTITY_EVENTS_ABI`, viem `decodeEventLog`):
 
-Independent checks at head `286104` (read-only, separate process, all PASS):
+```
+eventName: OwnershipTransferred
+args.entityKey       = 0x2b81eff4…b1eb   (matches the entity)
+args.previousOwner   = 0xD431714db82331B07697Ea4675334C3AF6d2EBE9  (= A)
+args.newOwner        = 0xAd797f58aFD3265C00504382171eC0818262D3ca  (= B)
+topic0 matches the SDK-declared signature selector: true
+```
 
-| Check | Result |
-|---|---|
-| Current owner is A | `0xD431…2EBE9` |
-| Creator is A | `0xD431…2EBE9` |
-| Proposed owner is B, and is not A | `0xAd79…D3ca`, distinct |
-| Signer will be A | connected account `0xd431…2ebe9` (lowercase form of the owner) |
-| Expiry unchanged | `588211`, **not expired** (`head + 302107` blocks left) |
-| Payload unchanged | 496 bytes, SHA-256 `dfe87f08…3391f9d`, identical to the creation |
-| No stale ownership state | owner still A on a fresh read; A nonce `latest == pending` (3/3), so nothing is stuck; balance still `4.999593659` tGLM |
+**In-process read-back (Studio, right after the receipt):** "Read-back passed:
+owner moved, creator/expiry/payload unchanged."
 
-**Defect found and fixed while preparing this preview:** every address comparison
-used `===`, but a wallet reports its account lowercased while the chain reports the
-checksummed form. The owner was therefore told "you are neither the owner nor the
-creator" and the preview refused. Comparisons now run through `sameAddress`
-(case-insensitive, viem-checked), the not-owner reason is categorised `validation`
-instead of `wrong-network`, and four regression tests cover the real lowercase
-shape plus a lowercased read-back and recipient. The DOM test now connects with a
-lowercase account, which fails without the fix.
+**Independent read-back (separate process)** against the post-transfer state,
+`--signer 0xAd79…D3ca` (current owner) and `--tx` the creation receipt:
 
-Transfer tx, `OwnershipTransferred` and the negative check stay pending: no
-`changeOwnership` has been called.
+```
+PASS  revalidates against the shared contract — experimentId "studio-mm-002"
+PASS  byte-identical to the canonical record — 496 bytes match
+FAIL  owner == creator — 0xAd79…D3ca vs 0xD431…2EBE9      ← the ARK-05 finding
+PASS  owner == signer — 0xAd79…D3ca vs 0xAd79…D3ca
+PASS  entity key matches the published key
+PASS  expiry after creation — 302400 blocks (285811 → 588211)
+PASS  mined receipt succeeded — status success at block 285811
+9/10 (exit 1)
+```
+
+The single FAIL is the point of the experiment and is not a defect: after a
+transfer the owner and creator are *meant* to differ. This is the first observed
+on-chain proof that `creator` is immutable while `owner` moved.
+
+**No stale or second state:** A's nonce went `3 → 4` (create + transfer), B signed
+nothing in this run (no prompt, balance byte-identical). B's on-chain nonce is `1`
+— a transaction B signed at some earlier time; the Rabdi node serves state at the
+head only, so the historical value cannot be time-sliced, but nothing in this run
+asked B to sign.
+
+**Unrelated entities untouched:** `poc-write-001` → `0x1d7b…b31a` (owner/creator
+`0x8C58…8759`) and `studio-mm-001` → `0x9038…bcb7` (owner/creator `0xD431…2EBE9`),
+both re-read after the transfer.
+
+**Panel accuracy fix during this stage:** after a confirmed transfer the role line
+still claimed ownership because the detail panel held the pre-transfer record. The
+controller now re-opens the entity (read-only) after a successful read-back, so
+the role line reflects the new owner; covered by a DOM test.
 
 ## Automation vs chain evidence
 

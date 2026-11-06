@@ -388,10 +388,12 @@ mined, the entity reads back, every payload field matches, actual gas was
     (`OperationType.TransferOwnership = 4`, `changeOwnership`, owner-must-sign,
     no accept step) and Studio gained a gated preview → confirm → read-back flow
     plus an honest-uncertainty path that re-reads once and never auto-retries.
-    ARK-05 stays PARTIAL: the creation stage is done (`studio-mm-002`, published
-    once by A and verified 10/10 independently), but nothing has been transferred
-    yet, so the ownership behaviour in [docs/arkiv-ark05.md](docs/arkiv-ark05.md)
-    remains unobserved and awaits explicit authorization for the transfer.
+    ARK-05 is DONE: with explicit authorization, one `changeOwnership` moved the
+    owner of `studio-mm-002` from A to B while `creator` stayed A, payload and
+    expiry were unchanged, the `OwnershipTransferred` event decoded to
+    `(entityKey, A, B)`, and A was then blocked from transferring again. Two
+    defects were fixed on the way (case-sensitive address comparison, stale owner
+    in the detail panel). Evidence: [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
 25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
