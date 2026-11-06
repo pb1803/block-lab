@@ -150,13 +150,16 @@ wallet A, then transferred to wallet B, with the `creator` proven immutable, the
 payload and expiry proven unchanged and the `OwnershipTransferred` event decoded;
 evidence in [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
-What is **not** claimed: no
-observed entity expiry. ARK-06 is investigation-only — the protocol rules are
-settled from SDK source and a 5-block probe is designed, but nothing was watched
-die, so `expiresAt` stays a recorded block rather than an observed transition. The
-verifier and probe for it exist and are dry-run verified, with no transaction sent
-([docs/arkiv-ark06.md](docs/arkiv-ark06.md), [docs/arkiv-ark06b.md](docs/arkiv-ark06b.md)). These stay experiments, not claims.
-See [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
+ARK-06 is DONE as a dedicated short-lifetime probe: `ark06-expiry-001` was created
+once at 5 blocks, watched live, and observed gone before its `expiresAt` block, with a
+second process verifying `expected-expired` 7/7 from the `EntityCreated` deadline.
+The run corrected the plan: an entity dies at `expiresAt − 1`, not at `expiresAt`
+([docs/arkiv-ark06.md](docs/arkiv-ark06.md) §15,
+[docs/arkiv-ark06b.md](docs/arkiv-ark06b.md)).
+
+What is **not** claimed: no anonymity property is measured, and the three long-lived
+entities have still not been watched to their own (much later) deadlines. These stay
+experiments, not claims. See [docs/arkiv-ark05.md](docs/arkiv-ark05.md).
 
 ## Studio Arkiv history
 

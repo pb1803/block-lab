@@ -1,9 +1,13 @@
 # ARK-06B — expiry verification implementation and live-run preparation
 
-**Status: PREPARED, NOT RUN.** No transaction was broadcast and no wallet was
-touched. `ark06-expiry-001` does not exist on chain yet. The single authorized
-create is still pending; the exact command and its preflight conditions are in
-[§6](#6-the-live-run-once-authorized).
+**Status: RUN (2026-11-07) — boundary observed, expiry independently verified.**
+One authorized create was broadcast under explicit approval; the entity expired on
+schedule and the closing verifier returned `expected-expired` 7/7 with exit 0. Live
+evidence and deviations: [docs/arkiv-ark06.md](arkiv-ark06.md) §15, and [§10](#10-live-run-actual-2026-11-07)
+below. `ark06-expiry-001` no longer exists on chain.
+
+**Prepared, not run** below is kept as the record of the preparation stage, except
+where §10 corrects it.
 
 Built on the investigation in [docs/arkiv-ark06.md](arkiv-ark06.md) (commit
 `68ccc4f`): the protocol rules there are not repeated and not second-guessed. This
@@ -207,3 +211,37 @@ without needing an expired entity to exist.
 - Key prediction with `NO_SALT` was not in the plan. It is what allows the poller to
   be armed before the signature instead of after, and it is recorded here because the
   entity key is therefore not random.
+
+## 10. Live run, actual (2026-11-07)
+
+Authorized explicitly, one create, nothing retried.
+
+| Item | Value |
+|---|---|
+| Entity key | `0x95a2e5c31f5638d8acc8ce9f58eea2a9f8ae92af59695692422799a8411b4045` |
+| Predicted key | the same — `NO_SALT` prediction over entity nonce `1` was exact |
+| Tx / landing block | `0xd48c06a420f058b106f882b4114f687b1af41cbaf63f2f1e005fb266eb82b02c` / `289297`, status `success` |
+| `expiresAt` | block `289302` = `289297 + 5` — the resolution rule held exactly |
+| Active samples | blocks `289299`, `289301` (live, payload SHA-256 `6f2c5df9…7e623`) |
+| First missing sample | block `289301`, i.e. **head `expiresAt − 1` already dead** |
+| Independent verifier | `expected-expired`, **7/7**, exit 0, head `289319` |
+| `select` by id after expiry | no rows — the index drops it with `getEntity` |
+| Gas | `177056 × 1 gwei = 0.000177056 tGLM` (signer `4.999790895` → `4.999613839`) |
+| Untouched | all three re-read live with identical payload hashes and owners |
+
+Deviations and observations worth carrying forward:
+
+1. **The `poll-until-live-then-missing` loop stopped on a same-block transition.** The
+   loop is checked once per tick, so a live sample and a missing sample can share block
+   `289301`; the boundary printed `last live block < 289301`. Between the last live
+   sample and the missing one the head crossed into `289301`, so the miss is stamped
+   with the block *after* the cross. The authoritative boundary came from the
+   independent verifier (head `289319 ≥ 289302`), not from this print. Anything reading
+   the sample log must prefer the verifier.
+2. **The boundary sits at `expiresAt − 1`, not `expiresAt`.** The assumption in
+   [docs/arkiv-ark06.md](arkiv-ark06.md) §2.8 that an entity is live until
+   `block == expiresAt` is **refuted**: at head `289301` with `expiresAt == 289302` it
+   was already gone. ARK-08's copy must say "expired at block N" as a *past* boundary.
+3. The dry-run's `signer funded` gate only ran under `--live`, so the "8/8" dry-run
+   figure and the live "8/8" are different check sets — both all-pass, but not the same
+   list.

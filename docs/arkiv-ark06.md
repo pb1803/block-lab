@@ -1,16 +1,15 @@
 # ARK-06 — real entity expiry, investigation and experiment plan
 
-**Status: INVESTIGATION + PREPARATION — PARTIAL.** No transaction was broadcast, no
-wallet was connected or asked to sign, no entity was created, extended or deleted.
-Every chain number below was read over RPC. Nothing here claims that an expiry
-transition was *observed*; ARK-06 stays PARTIAL until the experiment in
-[§7](#7-experiment-design) has run and an expired entity has been read back and
-independently checked.
+**Status: DONE (2026-11-07).** The experiment in [§7](#7-experiment-design) ran
+under explicit authorization: one entity, 5 blocks, and the transition from active to
+expired was observed and then independently verified by a second process
+(`expected-expired`, 7/7, exit 0). Nothing was retried, extended, transferred or
+deleted, and no existing record changed. Live evidence, the refuted boundary rule and
+the deviations: [§15](#15-result--live-expiry-observation-2026-11-07).
 
-The implementation that runs §7 now exists — the `--expect-expired` verifier and
-the `ark06-expiry-001` probe, both dry-run verified — and is documented in
-[docs/arkiv-ark06b.md](arkiv-ark06b.md). The live half is still pending
-authorization.
+Implementation of the verifier and the probe: [docs/arkiv-ark06b.md](arkiv-ark06b.md).
+Sections 1–14 are the investigation and the plan as written *before* the run; where
+the run contradicted them, §15 says so rather than the plan being rewritten.
 
 ## 1. Objective and boundaries
 
@@ -473,3 +472,64 @@ Docs and backlog only, so nothing runtime changed; `pnpm test` (386), `pnpm lint
 `pnpm typecheck` and `pnpm build` are run anyway to prove it. No `.env*`, key,
 access key or wallet data is added — this document quotes only public addresses,
 block numbers and hashes.
+
+## 15. Result — live expiry observation (2026-11-07)
+
+**Status: DONE, and the boundary rule of §2.8 is refuted.**
+
+One authorized create of `ark06-expiry-001`, signed by the harness signer, on Rabdi:
+
+| Field | Value |
+|---|---|
+| Entity key | `0x95a2e5c31f5638d8acc8ce9f58eea2a9f8ae92af59695692422799a8411b4045` |
+| Predicted key (before signing, `NO_SALT`) | identical — the prediction was exact |
+| Tx / landing block / receipt | `0xd48c06a420f058b106f882b4114f687b1af41cbaf63f2f1e005fb266eb82b02c` / `289297` / `success` |
+| `expiresAt` | `289302`, i.e. landing + 5 — the `max(expiresAt, landing + minLifetime)` rule of §2.2 held exactly |
+| Payload | 489 bytes, SHA-256 `6f2c5df90439696a543ecdf8af6e3c0e1ef9f8aac34facd6530604e07407e623`, byte-stable across every live sample |
+| Active observation | blocks `289299` and `289301`, both live, `$expiresAt` `289302` |
+| First missing observation | block `289301`, head `289301` — **already gone one block before `expiresAt`** |
+| Independent verifier (separate process) | `expected-expired`, **7/7 checks**, exit 0, head `289319`, deadline read from the `EntityCreated` event, not from a flag |
+| Indexed retrieval after expiry | `select` by `experimentId` returns no rows |
+| Gas | `177056 × 1 gwei = 0.000177056 tGLM` |
+| Untouched | `poc-write-001`, `studio-mm-001`, `studio-mm-002` re-read live, identical owners and payload hashes |
+
+### 15.1 The boundary is `expiresAt − 1`, not `expiresAt`
+
+The plan (§2.8) asserted "live while `block.number < $expiresAt`, expired at
+`block.number == $expiresAt`". The run **refutes the second half**: at head `289301`
+with `expiresAt == 289302` the entity was already returning `NoEntityFoundError`.
+So an entity is live only while `block.number < $expiresAt`, and it is dead from the
+block before the stored deadline — the expiry block in the record is the *first block
+at which it is certainly dead*, not the last live block. Anything that renders "live
+until block N" (ARK-08's copy) is one block optimistic.
+
+### 15.2 What the run proves, narrowly
+
+- the engine resolves `minLifetime` against the **landing** block (§2.4's prediction),
+  so no dead-on-arrival revert occurred and the target came out exactly as computed;
+- a 5-block (10 s) lifetime is real and usable;
+- an expired key reads as the documented `null`/`NoEntityFoundError`, is dropped from
+  the `experimentId` index, and *nothing* in the RPC response distinguishes expiry
+  from a nonexistent key (§2.7 confirmed — only the timing against `$expiresAt` does);
+- expiry is silent: no event fires at the boundary, and the only on-chain trace of the
+  deadline is the `EntityCreated` argument.
+
+### 15.3 Deviations and defects found
+
+1. **The poller's boundary print can be one block optimistic.** The loop compares a
+   live sample with the next tick's state while the head may have advanced past the
+   sample's block, so it reported "last live block < `289301`" when `289299` was the
+   last live block. The authoritative boundary is the verifier's (head ≥ `expiresAt`);
+   the sample line is a hint, not a measurement. Suggested fix, not done here: re-read
+   the head after each sample and annotate the sample with it.
+2. Nothing else deviated. No retry was needed, the create landed first time, and the
+   predicted key matched, so the reconciliation path stayed unused.
+3. `EntityCreated` on the receipt gave a deadline independent of our own config, which
+   is why the verifier could confirm the boundary without trusting the probe.
+
+### 15.4 Effect on ARK-08
+
+Two of the four mismatches listed in §12 now have concrete evidence: an expired entity
+arrives in Studio as `detail-missing` (category `missing`), indistinguishable from a
+typo, and the history list drops it silently. The §12.1/§12.2/§12.4 points stand; add
+that the panel's "expires at block N" wording is now known to be one block late.

@@ -425,6 +425,17 @@ mined, the entity reads back, every payload field matches, actual gas was
     including a real `EntityCreated` decode — nothing broadcast. See
     [docs/arkiv-ark06b.md](docs/arkiv-ark06b.md).
 
+    It then ran: one authorized create of `ark06-expiry-001` at 5 blocks landed at
+    block `289297` with `expiresAt` `289302` (= landing + 5), was observed live at
+    `289299`/`289301` and was gone by head `289301`, while a second process verified
+    `expected-expired` 7/7 exit 0 from the `EntityCreated` deadline. Gas
+    `0.000177056 tGLM`; the three existing entities were re-read unchanged. The run
+    **refuted** the plan's boundary assumption: an entity dies at `expiresAt − 1`, not
+    at `expiresAt`, so ARK-08's "expires at block N" wording is one block optimistic
+    and an expired key arrives as `missing`, indistinguishable from a typo. The
+    poller's boundary print was also found one block optimistic; the verifier is the
+    authority. ARK-06 is DONE.
+
 Verification for this phase: 339 tests / 34 files, lint/typecheck/build clean, and
 25/25 headless-Chrome checks with a labelled mock wallet (wiring and gating only —
 the publication claim rests on the read-back above, never on a mock run).
