@@ -29,7 +29,11 @@ import {
   hasEip1193Provider,
   switchToRabdi,
 } from "./arkiv/wallet.js";
-import { mountStudioShell, routeFromHash } from "./shell.js";
+import {
+  mountStudioShell,
+  reportTargetFromHash,
+  routeFromHash,
+} from "./shell.js";
 import { createThemeController } from "./theme.js";
 
 const root = document.querySelector<HTMLElement>("#studio-root");
@@ -39,11 +43,81 @@ if (root === null) {
 }
 
 const agent = createStudioAgentClient();
+const launchParameters = new URLSearchParams(
+  window.location.hash.split("?")[1] ?? "",
+);
+const launchEndpoint = launchParameters.get("agent");
+const launchToken = launchParameters.get("bootstrap");
+let automaticRecoveryAttempts = 0;
+let automaticRecoveryScheduled = false;
 const theme = createThemeController({ root: document.documentElement });
 const shell = mountStudioShell(root, routeFromHash(window.location.hash), {
   agent,
   theme,
 });
+if (launchEndpoint !== null && launchToken !== null) {
+  void agent.bootstrap(launchEndpoint, launchToken);
+}
+let reportTargetLoaded: string | undefined;
+const reportTargetsInFlight = new Set<string>();
+let previousConnection = agent.getState().connection;
+const loadRequestedReport = (): void => {
+  const reportTarget = reportTargetFromHash(window.location.hash);
+  if (reportTarget === undefined) return;
+  const state = agent.getState();
+  if (
+    (state.connection === "expired" || state.connection === "error") &&
+    launchEndpoint !== null &&
+    launchToken !== null &&
+    automaticRecoveryAttempts < 3 &&
+    !automaticRecoveryScheduled
+  ) {
+    automaticRecoveryScheduled = true;
+    const delay = 250 * 2 ** automaticRecoveryAttempts;
+    automaticRecoveryAttempts += 1;
+    window.setTimeout(() => {
+      automaticRecoveryScheduled = false;
+      if (
+        agent.getState().connection === "expired" ||
+        agent.getState().connection === "error"
+      ) {
+        void agent.bootstrap(launchEndpoint, launchToken);
+      }
+    }, delay);
+  }
+  if (state.connection === "connected" && previousConnection !== "connected") {
+    reportTargetLoaded = undefined;
+  }
+  previousConnection = state.connection;
+  if (state.connection !== "connected") return;
+  const { projectId, executionId } = reportTarget;
+  const targetKey = `${state.endpoint}\n${projectId}\n${executionId}`;
+  if (reportTargetLoaded === targetKey || reportTargetsInFlight.has(targetKey))
+    return;
+  reportTargetsInFlight.add(targetKey);
+  if (!state.projects.some((project) => project.projectId === projectId)) {
+    reportTargetLoaded = targetKey;
+    void agent.getReport(projectId, executionId);
+    return;
+  }
+  void (async () => {
+    try {
+      await agent.listReports(projectId);
+      if (agent.getState().connection !== "connected") return;
+      await agent.getReport(projectId, executionId);
+      if (
+        agent.getState().selectedReport?.executionId === executionId &&
+        agent.getState().selectedProjectId === projectId
+      ) {
+        reportTargetLoaded = targetKey;
+      }
+    } finally {
+      reportTargetsInFlight.delete(targetKey);
+    }
+  })();
+};
+agent.subscribe(loadRequestedReport);
+window.addEventListener("hashchange", loadRequestedReport);
 const walletError = document.createElement("div");
 walletError.className = "wallet-error";
 walletError.setAttribute("role", "alert");

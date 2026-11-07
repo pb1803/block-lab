@@ -43,12 +43,15 @@ successful proxy fault alone. Each scenario records proxy-observed timing,
 status, recovery, and error classification so the user can distinguish proxy
 behavior from dApp behavior.
 
-The inspect-only Local Agent is available for Studio onboarding. Start it with
-an explicit project directory, pair with its short-lived code in Studio
-Projects, and inspect the project through the existing safe inspector. It binds
-to loopback, rejects unapproved browser origins, never executes project code,
-and does not yet run experiments or import GitHub repositories. See
-[docs/deploy-01-local-agent.md](docs/deploy-01-local-agent.md).
+The CLI Quick Run can start or reuse the inspect-only Local Agent after an
+experiment and open Studio directly on the resulting report. Studio exchanges
+a short-lived, project-scoped launch capability automatically; the Agent
+remains loopback-only, validates the exact browser origin, and exposes only
+project inspection and verified read-only reports. Standalone Agents still
+support manual pairing in Studio Projects. No Local Agent route executes
+experiments or imports GitHub repositories. See
+[docs/deploy-01-local-agent.md](docs/deploy-01-local-agent.md) and
+[the local runtime protocol](docs/architecture/local-runtime-protocol.md).
 
 ## Anon-RPC browser routes
 

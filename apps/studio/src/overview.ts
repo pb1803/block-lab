@@ -115,6 +115,7 @@ export function createOverviewModel(
     scenarios: cliScenarios,
     studioCapabilities: [
       "Pair with the Local Agent and inspect explicitly authorized projects.",
+      "Read verified experiment reports and their local evidence.",
       "Query Arkiv experiment metadata through the Evidence Vault.",
       "Compare validated local metadata with a retrieved Arkiv record.",
     ],
@@ -126,7 +127,7 @@ export function createOverviewModel(
     experimentActivity: {
       available: false,
       explanation:
-        "Studio has no experiment execution or local evidence-history source. Recent runs, counts, and charts are therefore unavailable.",
+        "Studio does not execute experiments or aggregate recent-run charts. Pair the Local Agent and open Experiments to inspect verified reports and their local observations.",
     },
     quickActions: [
       {
@@ -459,13 +460,16 @@ function renderActivity(doc: Document, model: OverviewModel): HTMLElement {
   );
   const unavailable = element(doc, "div", "unavailable-state");
   const title = element(doc, "h4");
-  title.textContent = "Activity is not connected";
+  title.textContent = "Recent activity summaries are not available";
   const explanation = element(doc, "p", "muted");
   explanation.textContent = model.experimentActivity.explanation;
   const boundary = element(doc, "p", "muted");
   boundary.textContent =
     "Arkiv stores validated metadata only; it is not a substitute for complete local experiment evidence.";
-  unavailable.append(title, explanation, boundary);
+  const reports = element(doc, "a", "button button-secondary");
+  reports.href = "#/experiments";
+  reports.textContent = "Browse verified reports";
+  unavailable.append(title, explanation, boundary, reports);
   body.append(unavailable);
   return section;
 }

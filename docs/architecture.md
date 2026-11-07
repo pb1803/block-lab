@@ -8,30 +8,32 @@
 - `@blocklab/runner` owns Node.js experiment lifecycle concerns, including process ownership, cancellation, loopback enforcement, and future proxy execution.
 - `@blocklab/evidence` owns redacted local result persistence, evaluation, digesting, and report formatting.
 - `apps/cli` composes the shared packages for local operation without Studio, a hosted account, or remote services.
-- `apps/studio` is a browser-safe shell plus one read-only comparison panel and one wallet-mediated Arkiv history panel. The comparison panel renders payloads the host page already produced and never executes RPC requests; the Arkiv panel reads Arkiv through its gateway and publishes only through an explicit, wallet-signed action. Neither polls, and neither anonymizes anything. Filesystem and process control must later pass through an explicit local-agent boundary; the browser never receives arbitrary local access.
+- `apps/studio` is a browser-safe shell with a read-only Local Agent connection and report workflow, a comparison panel, and a wallet-mediated Arkiv history panel. Reports and evidence are fetched from the explicitly authorized loopback Agent and verified before display. The comparison panel renders payloads the host page already produced and never executes RPC requests; the Arkiv panel reads Arkiv through its gateway and publishes only through an explicit, wallet-signed action. Neither anonymizes anything. The browser never receives arbitrary local access.
 - `@blocklab/browser-rpc` is the only browser-only package. It owns the `@anon-rpc/browser-harness@0.4.0` dependency, hides it behind lazy imports, and provides two independent routes (`direct`, `anon-rpc`) behind one interface plus the comparison payload. It also exposes an optional Viem adapter (`@blocklab/browser-rpc/viem`, Viem as an optional peer dependency) that delegates every request to those transports. Nothing in the Node.js dependency graph imports it.
 - `@blocklab/arkiv-metadata` is the platform-neutral Arkiv record contract: schema version, allowlisted experiment metadata, strict validation, and canonical payload bytes plus digest. It has no dependencies and no I/O, so the CLI, the runner and the browser POC can all import it.
 - `apps/arkiv-poc` is an isolated browser POC for the Arkiv sponsor integration. It is the only workspace that imports `@arkiv-network/sdk`, uses a connected EIP-1193 wallet for signing, and writes one compact `blocklab.experiment` entity on the Rabdi testnet. The CLI, runner, core and Studio do not depend on it.
 
 ### Distribution and deployment
 
-The workspace CLI depends on `core`, `inspector`, `scenarios`, `runner`, and
-`evidence`; `pnpm build` bundles these internal modules into a standalone
-Node.js executable in the generated npm staging package at
+The workspace CLI depends on `core`, `inspector`, `scenarios`, `runner`,
+`evidence`, and the Local Agent server; `pnpm build` bundles these internal
+modules into a standalone Node.js executable in the generated npm staging package at
 `apps/cli/dist/npm`. The package contains no unresolved workspace dependencies
 or third-party runtime dependencies. It requires Node.js 24 or newer.
 
 The CLI owns an ephemeral loopback proxy for each CLI-driven experiment and
 closes it through the runner lifecycle. It is not a persistent proxy for
-external dApp traffic. The Local Agent remains a separate inspect-only
-workspace process and is not included in the npm package.
+external dApp traffic. The Local Agent remains inspect-only and provides
+loopback project inspection and digest-verified report reads; its server code
+is bundled in the npm package and is started or reused by CLI report handoffs.
 
 Studio is deployed as a static Vite application from `apps/studio/dist-app`.
 The Vercel configuration builds the Studio package and its workspace
-dependencies from the repository root. Studio can manually pair with and
-inspect a Local Agent, but there is no agent discovery or experiment
-execution/status/evidence protocol. The Local Agent's origin allowlist is
-currently suited to local Studio development, not a deployed Vercel origin.
+dependencies from the repository root. Studio can connect to an explicitly
+authorized Local Agent for inspection and verified report retrieval. CLI
+handoffs use a short-lived scoped bootstrap capability; standalone Agents may
+still be paired manually. The Agent's Origin allowlist includes the deployed
+Studio Origin for CLI handoffs. Studio does not execute experiments.
 
 ## Dependency direction
 
@@ -44,7 +46,7 @@ core
 ├── arkiv-metadata (dependency-free record contract)
 ├── browser-rpc ──(lazy, browser only)──> @anon-rpc/browser-harness
 │   └── /viem subpath ──(optional peer)──> viem
-├── apps/cli ──> inspector, scenarios, runner, evidence
+├── apps/cli ──> inspector, scenarios, runner, evidence, local-agent
 ├── apps/sample-dapp ──> browser-rpc
 ├── apps/anon-rpc-poc ──> browser-rpc
 ├── apps/studio ──> core, browser-rpc, arkiv-metadata, @arkiv-network/sdk (gateway only), viem

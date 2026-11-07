@@ -132,6 +132,189 @@ describe("Studio Local Runtime client", () => {
     expect(calls[3]?.body).toBe("{}");
   });
 
+  it("reuses its in-memory session instead of consuming another pairing code", async () => {
+    let pairingRequests = 0;
+    let projectRequests = 0;
+    const client = createStudioAgentClient(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/v1/health")) return jsonResponse(health);
+      if (url.endsWith("/v1/pair")) {
+        pairingRequests += 1;
+        return jsonResponse(paired);
+      }
+      if (url.endsWith("/v1/projects")) {
+        projectRequests += 1;
+        return jsonResponse(projects);
+      }
+      return jsonResponse({
+        protocolVersion: "1",
+        projectId: "local-project",
+        totalCount: 0,
+        reports: [],
+      });
+    });
+
+    await client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    await client.pair("http://127.0.0.1:8787", "already-consumed-code");
+    await client.listReports("local-project");
+
+    expect(pairingRequests).toBe(1);
+    expect(projectRequests).toBe(2);
+    expect(client.getState().connection).toBe("connected");
+    expect(client.getState().sessionAvailable).toBe(true);
+    expect(client.getState().reports?.totalCount).toBe(0);
+  });
+
+  it("uses the scoped bootstrap without calling the manual pairing endpoint", async () => {
+    const calls: string[] = [];
+    const client = createStudioAgentClient(async (input, init) => {
+      const url = String(input);
+      calls.push(`${url} ${init?.method ?? "GET"}`);
+      if (url.endsWith("/v1/bootstrap")) return jsonResponse(paired);
+      if (url.endsWith("/v1/projects")) return jsonResponse(projects);
+      return jsonResponse({});
+    });
+
+    await client.bootstrap("http://127.0.0.1:8787", "B".repeat(43));
+
+    expect(calls).toEqual([
+      "http://127.0.0.1:8787/v1/bootstrap POST",
+      "http://127.0.0.1:8787/v1/projects GET",
+    ]);
+    expect(client.getState().connection).toBe("connected");
+    expect(client.getState().sessionAvailable).toBe(true);
+    expect(JSON.stringify(client.getState())).not.toContain(paired.accessToken);
+  });
+
+  it("prevents concurrent clicks from sending duplicate pairing requests", async () => {
+    let releaseHealth: ((response: Response) => void) | undefined;
+    const healthRequest = new Promise<Response>((resolve) => {
+      releaseHealth = resolve;
+    });
+    let pairingRequests = 0;
+    const client = createStudioAgentClient(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/v1/health")) return healthRequest;
+      if (url.endsWith("/v1/pair")) {
+        pairingRequests += 1;
+        return jsonResponse(paired);
+      }
+      if (url.endsWith("/v1/projects")) return jsonResponse(projects);
+      return jsonResponse({});
+    });
+
+    const firstAttempt = client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    await client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    releaseHealth?.(jsonResponse(health));
+    await firstAttempt;
+
+    expect(pairingRequests).toBe(1);
+    expect(client.getState().connection).toBe("connected");
+  });
+
+  it("clears an expired session and requires an explicit fresh pairing", async () => {
+    let sessionExpired = false;
+    let pairRequests = 0;
+    const client = createStudioAgentClient(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/v1/health")) return jsonResponse(health);
+      if (url.endsWith("/v1/pair")) {
+        pairRequests += 1;
+        return jsonResponse(paired);
+      }
+      if (
+        url.endsWith("/v1/projects/local-project/reports") &&
+        sessionExpired
+      ) {
+        return jsonResponse(
+          {
+            error: {
+              code: "SESSION_EXPIRED",
+              message: "The Local Runtime session is expired or revoked.",
+              retryable: false,
+              requestId: "request-2",
+            },
+          },
+          401,
+        );
+      }
+      if (url.endsWith("/v1/projects")) return jsonResponse(projects);
+      return jsonResponse({});
+    });
+
+    await client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    sessionExpired = true;
+    await client.listReports("local-project");
+
+    expect(client.getState().connection).toBe("expired");
+    expect(client.getState().sessionAvailable).toBe(false);
+    expect(client.getState().error).toContain("fresh one-time code");
+    await client.pair("http://127.0.0.1:8787", "CD".repeat(16));
+    expect(pairRequests).toBe(2);
+    expect(client.getState().connection).toBe("connected");
+  });
+
+  it("ignores an in-flight report response after explicit disconnect", async () => {
+    let releaseReports: ((response: Response) => void) | undefined;
+    let reportRequestStarted: (() => void) | undefined;
+    const reportPromise = new Promise<Response>((resolve) => {
+      releaseReports = resolve;
+    });
+    const requestStarted = new Promise<void>((resolve) => {
+      reportRequestStarted = resolve;
+    });
+    const client = createStudioAgentClient(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/health")) return jsonResponse(health);
+      if (url.endsWith("/v1/pair")) return jsonResponse(paired);
+      if (url.endsWith("/v1/projects")) return jsonResponse(projects);
+      if (url.endsWith("/v1/session") && init?.method === "DELETE")
+        return jsonResponse({ revoked: true });
+      if (url.endsWith("/v1/projects/local-project/reports")) {
+        reportRequestStarted?.();
+        return reportPromise;
+      }
+      return jsonResponse({});
+    });
+
+    await client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    const pendingReports = client.listReports("local-project");
+    await requestStarted;
+    await client.revoke();
+    releaseReports?.(
+      jsonResponse({
+        protocolVersion: "1",
+        projectId: "local-project",
+        totalCount: 0,
+        reports: [],
+      }),
+    );
+    await pendingReports;
+
+    expect(client.getState().connection).toBe("disconnected");
+    expect(client.getState().reports).toBeUndefined();
+    expect(client.getState().sessionAvailable).toBe(false);
+  });
+
+  it("does not request reports for a project outside the authorized list", async () => {
+    let reportRequests = 0;
+    const client = createStudioAgentClient(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/v1/health")) return jsonResponse(health);
+      if (url.endsWith("/v1/pair")) return jsonResponse(paired);
+      if (url.endsWith("/v1/projects")) return jsonResponse(projects);
+      if (url.includes("/reports")) reportRequests += 1;
+      return jsonResponse({});
+    });
+
+    await client.pair("http://127.0.0.1:8787", "AB".repeat(16));
+    await client.listReports("unlisted-project");
+    await client.getReport("unlisted-project", "execution-1");
+
+    expect(reportRequests).toBe(0);
+    expect(client.getState().error).toContain("not authorized");
+  });
+
   it("rejects malformed health, project, and inspection responses", async () => {
     let responseKind: "health" | "projects" | "inspection" = "health";
     const client = createStudioAgentClient(async (input) => {
@@ -189,6 +372,18 @@ describe("Studio Local Runtime client", () => {
     expect(calls).toBe(0);
     expect(client.getState().connection).toBe("error");
     expect(client.getState().error).toContain("127.0.0.1");
+  });
+
+  it("reports an unavailable Local Agent without claiming a connection", async () => {
+    const client = createStudioAgentClient(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await client.bootstrap("http://127.0.0.1:8787", "B".repeat(43));
+
+    expect(client.getState().connection).toBe("error");
+    expect(client.getState().sessionAvailable).toBe(false);
+    expect(client.getState().error).toContain("Local Agent is unavailable");
   });
 
   it("surfaces the protocol error envelope and clears credentials on revoke", async () => {

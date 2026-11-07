@@ -1,9 +1,15 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, runCli } from "./cli.js";
+import {
+  CLI_VERSION,
+  EXIT_CODES,
+  runCli,
+  studioReportUrl,
+  validateRpcUrl,
+} from "./cli.js";
 
 async function listenUpstream(onRequest?: () => void): Promise<{
   readonly url: string;
@@ -62,7 +68,50 @@ describe("blocklab CLI", () => {
     }
   });
 
+  it("keeps automatic launch credentials in an expiring URL fragment only", () => {
+    const reportUrl = studioReportUrl("root-project", "execution-1");
+    const launchUrl = studioReportUrl("root-project", "execution-1", {
+      endpoint: "http://127.0.0.1:8787",
+      bootstrapToken: "A".repeat(43),
+    });
+    const parsed = new URL(launchUrl);
+
+    expect(reportUrl).toBe(
+      "https://block-lab-eight.vercel.app/#/experiments/root-project/execution-1",
+    );
+    expect(parsed.origin).toBe("https://block-lab-eight.vercel.app");
+    expect(parsed.search).toBe("");
+    expect(parsed.hash).toContain("agent=http%3A%2F%2F127.0.0.1%3A8787");
+    expect(parsed.hash).toContain(`bootstrap=${"A".repeat(43)}`);
+    expect(launchUrl).not.toContain("accessToken");
+  });
+
+  it("validates interactive RPC URL values without rewriting them", () => {
+    expect(validateRpcUrl("http://127.0.0.1:8545")).toBe(
+      "http://127.0.0.1:8545",
+    );
+    expect(validateRpcUrl("https://localhost:443/rpc")).toBe(
+      "https://localhost:443/rpc",
+    );
+    for (const value of [
+      "",
+      "5",
+      "not a url",
+      "ftp://127.0.0.1:8545",
+      "http://",
+      "http://127.0.0.1:0",
+      "http://127.0.0.1:65536",
+      "http://user:pass@127.0.0.1:8545",
+    ])
+      expect(validateRpcUrl(value)).toBeUndefined();
+  });
+
   it("prints help, version, and rejects unknown commands", async () => {
+    const packageManifest = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(CLI_VERSION).toBe(packageManifest.version);
+
     const help = capture();
     expect(await runCli(["--help"], help.dependencies)).toBe(
       EXIT_CODES.success,
@@ -75,6 +124,11 @@ describe("blocklab CLI", () => {
       EXIT_CODES.success,
     );
     expect(version.stdout.join("")).toMatch(/^\d+\.\d+\.\d+\n$/);
+    const versionCommand = capture();
+    expect(await runCli(["version"], versionCommand.dependencies)).toBe(
+      EXIT_CODES.success,
+    );
+    expect(versionCommand.stdout.join("")).toBe(version.stdout.join(""));
 
     const scenarios = capture();
     expect(await runCli(["scenarios"], scenarios.dependencies)).toBe(
@@ -98,6 +152,51 @@ describe("blocklab CLI", () => {
       EXIT_CODES.usage,
     );
     expect(unknown.stderr.join("")).toContain("Unknown command");
+  });
+
+  it("uses safe non-TTY behavior and reports empty or malformed evidence", async () => {
+    const noArgs = capture();
+    expect(await runCli([], noArgs.dependencies)).toBe(EXIT_CODES.success);
+    expect(noArgs.stdout.join("")).toContain("BLOCKLAB 0.2.0");
+
+    directory = await mkdtemp(join(tmpdir(), "blocklab-empty-cli-"));
+    await writeFile(join(directory, "broken.json"), "{not-json");
+    const listing = capture();
+    expect(
+      await runCli(
+        ["runs", "list", "--evidence-dir", directory],
+        listing.dependencies,
+      ),
+    ).toBe(EXIT_CODES.success);
+    expect(listing.stdout.join("")).toContain("No evidence runs found.");
+    expect(listing.stderr.join("")).toContain("broken.json");
+  });
+
+  it("starts the inspect-only Local Agent with explicit origins", async () => {
+    const controller = new AbortController();
+    const result = capture();
+    const start = runCli(
+      [
+        "agent",
+        "start",
+        ".",
+        "--allowed-origin",
+        "http://127.0.0.1:5178",
+        "--allowed-origin",
+        "https://studio.example.test",
+      ],
+      {
+        ...result.dependencies,
+        cwd: process.cwd(),
+        signal: controller.signal,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    controller.abort();
+    expect(await start).toBe(EXIT_CODES.success);
+    expect(result.stdout.join("")).toContain("BLOCKLAB Local Agent ready");
+    expect(result.stdout.join("")).toContain("explicit, inspect-only");
+    expect(result.stdout.join("")).not.toContain("accessToken");
   });
 
   it("inspects a project with JSON output without executing scripts", async () => {

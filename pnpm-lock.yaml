@@ -61,6 +61,9 @@ importers:
       '@blocklab/inspector':
         specifier: workspace:*
         version: link:../../packages/inspector
+      '@blocklab/local-agent':
+        specifier: workspace:*
+        version: link:../local-agent
       '@blocklab/runner':
         specifier: workspace:*
         version: link:../../packages/runner
@@ -76,6 +79,9 @@ importers:
       '@blocklab/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@blocklab/evidence':
+        specifier: workspace:*
+        version: link:../../packages/evidence
       '@blocklab/inspector':
         specifier: workspace:*
         version: link:../../packages/inspector

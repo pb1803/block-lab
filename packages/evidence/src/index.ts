@@ -4,11 +4,27 @@ import {
   mkdir,
   readdir,
   readFile,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ExperimentResult } from "@blocklab/core";
+import {
+  REPORT_MAX_OBSERVATIONS,
+  REPORT_MAX_PAGE_SIZE,
+  REPORT_MAX_RESPONSE_BYTES,
+  REPORT_PROTOCOL_VERSION,
+  type ReportConfiguration,
+  type ReportDetail,
+  type ReportEvaluation,
+  type ReportEvaluationPhase,
+  type ReportIntegrityStatus,
+  type ReportListResponse,
+  type ReportMetrics,
+  type ReportObservation,
+  type ReportSummary,
+} from "@blocklab/core";
 
 export const EVIDENCE_SCHEMA_VERSION = "1.0" as const;
 export const RPC_BLACKOUT_SCENARIO_VERSION = "1.0.0" as const;
@@ -336,8 +352,160 @@ export class EvidenceValidationError extends Error {
   }
 }
 
+export const MAX_EVIDENCE_FILE_BYTES = REPORT_MAX_RESPONSE_BYTES;
+const MAX_IDENTIFIER_LENGTH = 128;
+const MAX_OBSERVATION_METHOD_LENGTH = 256;
+const MAX_CORRELATION_ID_LENGTH = 128;
+const MAX_DIAGNOSTIC_LENGTH = 1_024;
+const MAX_TEXT_ARRAY_LENGTH = 64;
+const MAX_TOTAL_OBJECT_KEYS = 8_192;
+const MAX_JSON_DEPTH = 12;
+const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export interface EvidenceIntegrity {
+  readonly status: ReportIntegrityStatus;
+  readonly error?: string;
+}
+
+export type EvidenceIntegrityResult =
+  | {
+      readonly integrity: { readonly status: "verified" };
+      readonly evidence: EvidenceRecord;
+    }
+  | {
+      readonly integrity: EvidenceIntegrity & {
+        readonly status: Exclude<ReportIntegrityStatus, "verified">;
+      };
+      readonly evidence?: never;
+    };
+
+function digestInput(evidence: EvidenceRecord): Record<string, unknown> {
+  return {
+    schemaVersion: evidence.schemaVersion,
+    executionId: evidence.executionId,
+    scenarioId: evidence.scenarioId,
+    scenarioVersion: evidence.scenarioVersion,
+    configuration: evidence.configuration,
+    startedAt: evidence.startedAt,
+    finishedAt: evidence.finishedAt,
+    terminalState: evidence.terminalState,
+    observations: evidence.observations,
+    evaluation: evidence.evaluation,
+  };
+}
+
+export function calculateEvidenceDigest(evidence: EvidenceRecord): string {
+  return createHash("sha256")
+    .update(JSON.stringify(digestInput(evidence)))
+    .digest("hex");
+}
+
+export function verifyEvidenceDigest(evidence: EvidenceRecord): boolean {
+  return (
+    typeof evidence.evidenceDigest === "string" &&
+    /^[0-9a-f]{64}$/.test(evidence.evidenceDigest) &&
+    calculateEvidenceDigest(evidence) === evidence.evidenceDigest
+  );
+}
+
+export function inspectEvidenceIntegrity(value: unknown): EvidenceIntegrity {
+  if (!isObject(value)) {
+    return { status: "malformed", error: "Evidence record must be an object." };
+  }
+  if (value.schemaVersion !== EVIDENCE_SCHEMA_VERSION) {
+    return {
+      status: "unsupported-version",
+      error: "Evidence schema version is unsupported.",
+    };
+  }
+  if (value.evidenceDigest === undefined) {
+    return { status: "missing-digest", error: "Evidence digest is missing." };
+  }
+  try {
+    validateEvidence(value);
+  } catch (error) {
+    return {
+      status: "malformed",
+      error: error instanceof Error ? error.message : "Evidence is malformed.",
+    };
+  }
+  if (!verifyEvidenceDigest(value)) {
+    return {
+      status: "digest-mismatch",
+      error: "Evidence digest does not match its content.",
+    };
+  }
+  return { status: "verified" };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertSafeIdentifier(
+  value: unknown,
+  field: string,
+): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_IDENTIFIER_LENGTH ||
+    !SAFE_IDENTIFIER.test(value)
+  ) {
+    throw new EvidenceValidationError(`${field} is invalid.`);
+  }
+}
+
+function assertEvidenceBounds(value: unknown): void {
+  const seen = new WeakSet<object>();
+  const visit = (
+    current: unknown,
+    depth: number,
+    keys: { count: number },
+  ): void => {
+    if (depth > MAX_JSON_DEPTH)
+      throw new EvidenceValidationError("Evidence nesting exceeds the limit.");
+    if (typeof current === "string") {
+      if (current.length > MAX_DIAGNOSTIC_LENGTH)
+        throw new EvidenceValidationError("Evidence string exceeds the limit.");
+      return;
+    }
+    if (current === null || typeof current !== "object") return;
+    if (seen.has(current))
+      throw new EvidenceValidationError("Evidence contains a cycle.");
+    seen.add(current);
+    if (Array.isArray(current)) {
+      if (current.length > REPORT_MAX_OBSERVATIONS)
+        throw new EvidenceValidationError("Evidence array exceeds the limit.");
+      for (const item of current) visit(item, depth + 1, keys);
+    } else {
+      const entries = Object.entries(current);
+      keys.count += entries.length;
+      if (entries.length > 128 || keys.count > MAX_TOTAL_OBJECT_KEYS) {
+        throw new EvidenceValidationError("Evidence object exceeds the limit.");
+      }
+      for (const [key, item] of entries) {
+        if (key.length > 128)
+          throw new EvidenceValidationError(
+            "Evidence field name exceeds the limit.",
+          );
+        visit(item, depth + 1, keys);
+      }
+    }
+    seen.delete(current);
+  };
+  visit(value, 0, { count: 0 });
+  try {
+    if (
+      Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_EVIDENCE_FILE_BYTES
+    ) {
+      throw new EvidenceValidationError(
+        "Evidence exceeds the maximum supported size.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof EvidenceValidationError) throw error;
+    throw new EvidenceValidationError("Evidence cannot be serialized.");
+  }
 }
 
 function assertTimestamp(
@@ -610,7 +778,10 @@ function assertObservation(
     !Number.isFinite(value.latencyMs) ||
     value.latencyMs < 0 ||
     typeof value.correlationId !== "string" ||
-    value.correlationId.length === 0
+    value.correlationId.length === 0 ||
+    value.method.length === 0 ||
+    value.method.length > MAX_OBSERVATION_METHOD_LENGTH ||
+    value.correlationId.length > MAX_CORRELATION_ID_LENGTH
   ) {
     throw new EvidenceValidationError(`Observation ${index} is invalid.`);
   }
@@ -632,14 +803,13 @@ export function validateEvidence(
   if (!isObject(value)) {
     throw new EvidenceValidationError("Evidence record must be an object.");
   }
+  assertEvidenceBounds(value);
   if (value.schemaVersion !== EVIDENCE_SCHEMA_VERSION) {
     throw new EvidenceValidationError(
       `Unsupported evidence schema version: ${String(value.schemaVersion)}.`,
     );
   }
   if (
-    typeof value.recordId !== "string" ||
-    typeof value.executionId !== "string" ||
     !(
       (value.scenarioId === "rpc-blackout" &&
         value.scenarioVersion === RPC_BLACKOUT_SCENARIO_VERSION) ||
@@ -659,6 +829,8 @@ export function validateEvidence(
       "Unsupported or incomplete scenario identity.",
     );
   }
+  assertSafeIdentifier(value.recordId, "recordId");
+  assertSafeIdentifier(value.executionId, "executionId");
   switch (value.scenarioId) {
     case "rpc-blackout":
       assertSchedule(value.configuration);
@@ -693,6 +865,7 @@ export function validateEvidence(
       String(value.terminalState),
     ) ||
     !Array.isArray(value.observations) ||
+    value.observations.length > REPORT_MAX_OBSERVATIONS ||
     typeof value.evidenceDigest !== "string" ||
     !/^[0-9a-f]{64}$/.test(value.evidenceDigest)
   ) {
@@ -713,6 +886,256 @@ export function validateEvidence(
   if (!isObject(value.evaluation)) {
     throw new EvidenceValidationError("Evaluation is required.");
   }
+  if (
+    !Array.isArray(value.warnings) ||
+    !Array.isArray(value.limitations) ||
+    value.warnings.length > MAX_TEXT_ARRAY_LENGTH ||
+    value.limitations.length > MAX_TEXT_ARRAY_LENGTH
+  ) {
+    throw new EvidenceValidationError("Evidence diagnostics are invalid.");
+  }
+  for (const diagnostic of [...value.warnings, ...value.limitations]) {
+    if (
+      typeof diagnostic !== "string" ||
+      diagnostic.length > MAX_DIAGNOSTIC_LENGTH
+    ) {
+      throw new EvidenceValidationError("Evidence diagnostic is invalid.");
+    }
+  }
+}
+
+function redactDiagnostic(value: string): string {
+  const withoutHeaders = value
+    .replace(
+      /\bAuthorization\s*:\s*Bearer\s+[^\s,;]+/gi,
+      "Authorization: [REDACTED_SECRET]",
+    )
+    .replace(
+      /\bAuthorization\s*:\s*[^\s,;]+/gi,
+      "Authorization: [REDACTED_SECRET]",
+    )
+    .replace(/\bX-API-Key\s*:\s*[^\s,;]+/gi, "X-API-Key: [REDACTED_SECRET]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\x2f=-]+/gi, "Bearer [REDACTED_SECRET]")
+    .replace(
+      /\b(?:AWS|AZURE|GCP|GOOGLE|GITHUB|NPM|DATABASE|DB)_[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s,;]+/g,
+      "[REDACTED_SECRET]",
+    )
+    .replace(
+      /(["']?)(?:api[_-]?key|access[_-]?key|secret|token|password|private[_-]?key)\1\s*[:=]\s*["']?[^"',}\s]+["']?/gi,
+      "[REDACTED_SECRET]",
+    );
+  const withoutCredentials = withoutHeaders.replace(
+    /\bhttps?:\/\/[^\s"'<>]+/gi,
+    (candidate) => {
+      try {
+        return new URL(candidate).origin;
+      } catch {
+        return "[REDACTED_URL]";
+      }
+    },
+  );
+  return withoutCredentials
+    .replace(/(?:\\\\|\/\/)[^\\/\s]+(?:\\[^\\/\s]+)+/g, "[REDACTED_PATH]")
+    .replace(/\b[A-Za-z]:\\[^"'<>]+/g, "[REDACTED_PATH]")
+    .replace(/(?:^|\s)~\/[^ "'<>]*/g, " [REDACTED_PATH]")
+    .replace(/(?:^|\s)\/(?:[^ "'<>]+\/)+[^ "'<>]*/g, " [REDACTED_PATH]")
+    .slice(0, 1_024);
+}
+
+function reportConfiguration(evidence: EvidenceRecord): ReportConfiguration {
+  const allowed = new Set(
+    evidence.scenarioId === "rpc-blackout"
+      ? ["startOffsetMs", "durationMs", "experimentDurationMs"]
+      : evidence.scenarioId === "rpc-latency"
+        ? ["delayMs", "startOffsetMs", "durationMs", "experimentDurationMs"]
+        : evidence.scenarioId === "rpc-intermittent-failure"
+          ? [
+              "startOffsetMs",
+              "failureDurationMs",
+              "recoveryIntervalMs",
+              "windowCount",
+              "experimentDurationMs",
+              "httpStatus",
+            ]
+          : evidence.scenarioId === "rpc-rate-limit"
+            ? [
+                "maxRequests",
+                "windowMs",
+                "cooldownMs",
+                "retryAfterSeconds",
+                "experimentDurationMs",
+              ]
+            : [
+                "faultMode",
+                "startOffsetMs",
+                "durationMs",
+                "experimentDurationMs",
+              ],
+  );
+  const configuration: Record<string, number | string> = {};
+  for (const [key, value] of Object.entries(evidence.configuration)) {
+    if (
+      !allowed.has(key) ||
+      (typeof value !== "number" && typeof value !== "string")
+    ) {
+      throw new EvidenceValidationError("Evidence configuration is unsafe.");
+    }
+    configuration[key] = value;
+  }
+  return configuration;
+}
+
+function reportMetrics(metrics: EvidenceMetrics): ReportMetrics {
+  return {
+    totalRequests: metrics.totalRequests,
+    requestsByPhase: metrics.requestsByPhase,
+    successfulForwardedRequests: metrics.successfulForwardedRequests,
+    upstreamErrors: metrics.upstreamErrors,
+    injectedBlackoutFailures: metrics.injectedBlackoutFailures,
+    invalidRequests: metrics.invalidRequests,
+    recoverySuccessCount: metrics.recoverySuccessCount,
+    injectedRequestCount: metrics.injectedRequestCount,
+    ...(metrics.averageLatencyMs === undefined
+      ? {}
+      : { averageLatencyMs: metrics.averageLatencyMs }),
+    ...(metrics.medianLatencyMs === undefined
+      ? {}
+      : { medianLatencyMs: metrics.medianLatencyMs }),
+    ...(metrics.recoveryLatencyMs === undefined
+      ? {}
+      : { recoveryLatencyMs: metrics.recoveryLatencyMs }),
+    ...(metrics.baselineAverageLatencyMs === undefined
+      ? {}
+      : { baselineAverageLatencyMs: metrics.baselineAverageLatencyMs }),
+    ...(metrics.faultAverageLatencyMs === undefined
+      ? {}
+      : { faultAverageLatencyMs: metrics.faultAverageLatencyMs }),
+    ...(metrics.recoveryAverageLatencyMs === undefined
+      ? {}
+      : { recoveryAverageLatencyMs: metrics.recoveryAverageLatencyMs }),
+    ...(metrics.observedAdditionalLatencyMs === undefined
+      ? {}
+      : { observedAdditionalLatencyMs: metrics.observedAdditionalLatencyMs }),
+  };
+}
+
+function reportEvaluationPhase(phase: PhaseEvaluation): ReportEvaluationPhase {
+  return {
+    status: phase.status,
+    reasons: phase.reasons.map(redactDiagnostic).slice(0, 64),
+    explanation: redactDiagnostic(phase.explanation),
+  };
+}
+
+function reportEvaluation(evaluation: ExperimentEvaluation): ReportEvaluation {
+  return {
+    status: evaluation.status,
+    baseline: reportEvaluationPhase(evaluation.baseline),
+    fault: reportEvaluationPhase(evaluation.fault),
+    recovery: reportEvaluationPhase(evaluation.recovery),
+    reasons: evaluation.reasons.map(redactDiagnostic).slice(0, 64),
+    explanation: redactDiagnostic(evaluation.explanation),
+    metrics: reportMetrics(evaluation.metrics),
+    warnings: evaluation.warnings.map(redactDiagnostic).slice(0, 64),
+  };
+}
+
+function reportObservations(
+  observations: readonly EvidenceObservation[],
+): readonly ReportObservation[] {
+  if (observations.length > REPORT_MAX_OBSERVATIONS) {
+    throw new EvidenceValidationError("Report observations exceed the limit.");
+  }
+  return observations.map((observation) => ({
+    phase: observation.phase,
+    timestamp: observation.timestamp,
+    method: observation.method,
+    outcome: observation.outcome,
+    injected: observation.injected,
+    latencyMs: observation.latencyMs,
+    ...(observation.errorCategory === undefined
+      ? {}
+      : { errorCategory: redactDiagnostic(observation.errorCategory) }),
+    correlationId: observation.correlationId,
+    ...(observation.requestTimestamp === undefined
+      ? {}
+      : { requestTimestamp: observation.requestTimestamp }),
+    ...(observation.injectedDelayMs === undefined
+      ? {}
+      : { injectedDelayMs: observation.injectedDelayMs }),
+  }));
+}
+
+export function toReportSummary(evidence: EvidenceRecord): ReportSummary {
+  validateEvidence(evidence);
+  const integrity = inspectEvidenceIntegrity(evidence);
+  return {
+    executionId: evidence.executionId,
+    recordId: evidence.recordId,
+    scenarioId: evidence.scenarioId,
+    scenarioVersion: evidence.scenarioVersion,
+    terminalState: evidence.terminalState,
+    evaluation: reportEvaluation(evidence.evaluation),
+    startedAt: evidence.startedAt,
+    completedAt: evidence.finishedAt,
+    evidenceDigest: evidence.evidenceDigest,
+    integrityStatus: integrity.status,
+  };
+}
+
+export function toReportDetail(evidence: EvidenceRecord): ReportDetail {
+  const summary = toReportSummary(evidence);
+  const detail: ReportDetail = {
+    ...summary,
+    configuration: reportConfiguration(evidence),
+    observations: reportObservations(evidence.observations),
+    diagnostics: {
+      warnings: evidence.warnings.map(redactDiagnostic).slice(0, 64),
+      limitations: evidence.limitations.map(redactDiagnostic).slice(0, 64),
+    },
+  };
+  if (
+    Buffer.byteLength(JSON.stringify(detail), "utf8") >
+    REPORT_MAX_RESPONSE_BYTES
+  ) {
+    throw new EvidenceValidationError(
+      "Report exceeds the maximum response size.",
+    );
+  }
+  return detail;
+}
+
+export function toReportListResponse(
+  projectId: string,
+  evidence: readonly EvidenceRecord[],
+  nextCursor?: string,
+  totalCount = evidence.length,
+): ReportListResponse {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(projectId)) {
+    throw new EvidenceValidationError("Project identifier is invalid.");
+  }
+  if (evidence.length > REPORT_MAX_PAGE_SIZE) {
+    throw new EvidenceValidationError("Report page exceeds the maximum size.");
+  }
+  const response: ReportListResponse = {
+    protocolVersion: REPORT_PROTOCOL_VERSION,
+    projectId,
+    totalCount,
+    reports: evidence.map(toReportSummary),
+    ...(nextCursor === undefined ? {} : { nextCursor }),
+  };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(response);
+  } catch {
+    throw new EvidenceValidationError("Report list cannot be serialized.");
+  }
+  if (Buffer.byteLength(serialized, "utf8") > REPORT_MAX_RESPONSE_BYTES) {
+    throw new EvidenceValidationError(
+      "Report list exceeds the maximum response size.",
+    );
+  }
+  return response;
 }
 
 function scheduleEnd(startedAt: string, schedule: BlackoutSchedule): number {
@@ -1985,6 +2408,12 @@ export async function writeEvidence(
 ): Promise<void> {
   validateEvidence(evidence);
   await mkdir(dirname(path), { recursive: true });
+  const serialized = `${JSON.stringify(evidence, null, 2)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > MAX_EVIDENCE_FILE_BYTES) {
+    throw new EvidenceValidationError(
+      "Evidence file exceeds the maximum supported size.",
+    );
+  }
   try {
     await readFile(path);
     throw new EvidenceValidationError(`Evidence file already exists: ${path}.`);
@@ -2002,7 +2431,7 @@ export async function writeEvidence(
     }
   }
   const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(evidence, null, 2)}\n`, {
+  await writeFile(temporary, serialized, {
     encoding: "utf8",
     flag: "wx",
   });
@@ -2016,8 +2445,15 @@ export async function writeEvidence(
 export async function readEvidence(path: string): Promise<EvidenceRecord> {
   let parsed: unknown;
   try {
+    const metadata = await stat(path);
+    if (metadata.size > MAX_EVIDENCE_FILE_BYTES) {
+      throw new EvidenceValidationError(
+        "Evidence file exceeds the maximum supported size.",
+      );
+    }
     parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
   } catch (error) {
+    if (error instanceof EvidenceValidationError) throw error;
     throw new EvidenceValidationError(
       `Could not read evidence file: ${
         error instanceof Error ? error.message : "unknown error"
@@ -2026,6 +2462,44 @@ export async function readEvidence(path: string): Promise<EvidenceRecord> {
   }
   validateEvidence(parsed);
   return parsed;
+}
+
+export async function readEvidenceWithIntegrity(
+  path: string,
+): Promise<EvidenceIntegrityResult> {
+  try {
+    const metadata = await stat(path);
+    if (metadata.size > MAX_EVIDENCE_FILE_BYTES) {
+      return {
+        integrity: {
+          status: "oversized",
+          error: "Evidence file exceeds the maximum supported size.",
+        },
+      };
+    }
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    const integrity = inspectEvidenceIntegrity(parsed);
+    if (integrity.status === "verified") {
+      return {
+        evidence: parsed as EvidenceRecord,
+        integrity: { status: "verified" },
+      };
+    }
+    return {
+      integrity: {
+        ...integrity,
+        status: integrity.status as Exclude<ReportIntegrityStatus, "verified">,
+      },
+    };
+  } catch (error) {
+    return {
+      integrity: {
+        status: "malformed",
+        error:
+          error instanceof Error ? error.message : "Could not read evidence.",
+      },
+    };
+  }
 }
 
 export async function listEvidence(

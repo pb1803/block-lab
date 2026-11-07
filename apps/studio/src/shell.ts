@@ -1,6 +1,8 @@
 import type {
   AgentInspectionResponse,
   AuthorizedProject,
+  ReportDetail,
+  ReportSummary,
 } from "@blocklab/core";
 import type { AgentConnectionState, StudioAgentClient } from "./agent.js";
 import type { StudioArkivState } from "./arkiv/types.js";
@@ -167,6 +169,8 @@ export function agentStatusPresentation(
       return { label: "Local Agent connected", tone: "success" };
     case "pairing":
       return { label: "Connecting to Local Agent", tone: "info" };
+    case "expired":
+      return { label: "Local Agent session expired", tone: "warning" };
     case "error":
       return { label: "Local Agent connection error", tone: "error" };
     default:
@@ -183,6 +187,27 @@ export function routeFromHash(hash: string): StudioRoute {
 
 export function hashForRoute(route: StudioRoute): string {
   return `#/${route}`;
+}
+
+export function hashForReport(projectId: string, executionId: string): string {
+  return `#/experiments/${encodeURIComponent(projectId)}/${encodeURIComponent(executionId)}`;
+}
+
+export function reportTargetFromHash(
+  hash: string,
+): { readonly projectId: string; readonly executionId: string } | undefined {
+  const match = (hash.split("?")[0] ?? "").match(
+    /^#\/experiments\/([^/]+)\/([^/]+)$/,
+  );
+  if (match === null) return undefined;
+  try {
+    const projectId = decodeURIComponent(match[1] ?? "");
+    const executionId = decodeURIComponent(match[2] ?? "");
+    if (projectId.length === 0 || executionId.length === 0) return undefined;
+    return { projectId, executionId };
+  } catch {
+    return undefined;
+  }
 }
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -323,14 +348,15 @@ function renderProjects(
   pair.type = "button";
   pair.className = "button button-primary";
   pair.dataset.agentAction = "pair";
-  pair.textContent =
-    state?.connection === "connected" ? "Reconnect" : "Pair agent";
+  pair.textContent = state?.sessionAvailable ? "Reconnect" : "Pair agent";
+  pair.disabled = state?.connection === "pairing";
   const revoke = createElement(doc, "button");
   revoke.type = "button";
   revoke.className = "button button-secondary";
   revoke.dataset.agentAction = "revoke";
   revoke.textContent = "Disconnect";
-  revoke.hidden = state?.connection !== "connected";
+  revoke.hidden = state?.sessionAvailable !== true;
+  revoke.disabled = state?.connection === "pairing";
   form.append(endpoint, code, pair, revoke);
   connection.append(connectionTitle, status, form);
   if (state?.error) {
@@ -387,10 +413,205 @@ function projectCard(
       ? "Reinspect project"
       : "Inspect project";
   card.append(title, root, badge, inspect);
+  const reports = createElement(doc, "button");
+  reports.type = "button";
+  reports.className = "button button-secondary";
+  reports.dataset.agentAction = "reports";
+  reports.dataset.projectId = project.projectId;
+  reports.textContent = "View reports";
+  card.append(reports);
   if (inspection?.project.projectId === project.projectId) {
     card.append(renderInspection(doc, inspection));
   }
   return card;
+}
+
+function reportStatusLabel(status: ReportSummary["integrityStatus"]): string {
+  return status.replace("-", " ");
+}
+
+function reportCard(
+  doc: Document,
+  projectId: string,
+  report: ReportSummary,
+): HTMLElement {
+  const card = createElement(doc, "article", "project-card");
+  const title = createElement(doc, "h3");
+  title.textContent = report.scenarioId;
+  const metadata = createElement(doc, "p", "muted");
+  metadata.textContent = `${report.executionId} · ${report.terminalState} · ${report.startedAt}`;
+  const integrity = createStatus(
+    doc,
+    `Integrity: ${reportStatusLabel(report.integrityStatus)}`,
+    report.integrityStatus === "verified" ? "success" : "warning",
+  );
+  const open = createElement(doc, "button");
+  open.type = "button";
+  open.className = "button button-secondary";
+  open.dataset.agentAction = "open-report";
+  open.dataset.projectId = projectId;
+  open.dataset.executionId = report.executionId;
+  open.textContent = "Open report";
+  card.append(title, metadata, integrity, open);
+  return card;
+}
+
+function renderReports(
+  doc: Document,
+  agent: StudioAgentClient | undefined,
+): HTMLElement {
+  const section = createElement(doc, "section", "projects-page");
+  section.setAttribute("aria-labelledby", "reports-title");
+  const state = agent?.getState();
+  const heading = createElement(doc, "div", "page-heading");
+  const eyebrow = createElement(doc, "p", "eyebrow");
+  eyebrow.textContent = "LOCAL EVIDENCE";
+  const title = createElement(doc, "h2");
+  title.id = "reports-title";
+  title.textContent = "Experiments and reports";
+  const description = createElement(doc, "p", "page-lead");
+  description.textContent =
+    "Read-only reports loaded from the explicitly authorized Local Agent.";
+  heading.append(eyebrow, title, description);
+  section.append(heading);
+  if (state?.error !== undefined) {
+    const error = createElement(doc, "p", "inline-error");
+    error.setAttribute("role", "alert");
+    error.textContent = state.error;
+    section.append(error);
+  }
+  if (state?.connection !== "connected") {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent =
+      "Connect and pair the Local Agent from Projects before loading local reports.";
+    section.append(empty);
+    return section;
+  }
+  if (state.selectedProjectId === undefined) {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent =
+      "Select an explicitly authorized project from Projects to load reports.";
+    section.append(empty);
+    return section;
+  }
+  const toolbar = createElement(doc, "div", "section-heading");
+  const refresh = createElement(doc, "button");
+  refresh.type = "button";
+  refresh.className = "button button-secondary";
+  refresh.dataset.agentAction = "refresh-reports";
+  refresh.textContent = "Refresh";
+  toolbar.append(refresh);
+  section.append(toolbar);
+  if (state.reportsLoading) {
+    const loading = createElement(doc, "p", "empty-copy");
+    loading.textContent = "Loading local reports…";
+    section.append(loading);
+    return section;
+  }
+  const reports = state.reports?.reports ?? [];
+  if (reports.length === 0) {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent = "No verified local reports found for this project.";
+    section.append(empty);
+  } else {
+    const list = createElement(doc, "div", "project-list");
+    for (const report of reports)
+      list.append(reportCard(doc, state.selectedProjectId, report));
+    section.append(list);
+  }
+  if (state.selectedReport !== undefined)
+    section.append(renderReportDetail(doc, state.selectedReport));
+  return section;
+}
+
+function renderReportDetail(doc: Document, report: ReportDetail): HTMLElement {
+  const section = createElement(doc, "article", "panel");
+  const title = createElement(doc, "h3");
+  title.textContent = `Report ${report.executionId}`;
+  const summary = createElement(doc, "p", "muted");
+  summary.textContent = `${report.scenarioId} · ${report.terminalState} · integrity ${report.integrityStatus}`;
+  section.append(title, summary);
+  const timeline = createElement(doc, "div", "report-timeline");
+  timeline.setAttribute("aria-label", "Experiment phase results");
+  for (const [phase, result] of [
+    ["Baseline", report.evaluation.baseline],
+    ["Fault", report.evaluation.fault],
+    ["Recovery", report.evaluation.recovery],
+  ] as const) {
+    const item = createElement(doc, "section", "report-phase");
+    const phaseTitle = createElement(doc, "h4");
+    phaseTitle.textContent = `${phase} · ${result.status}`;
+    const explanation = createElement(doc, "p");
+    explanation.textContent = result.explanation;
+    item.append(phaseTitle, explanation);
+    timeline.append(item);
+  }
+  section.append(timeline);
+  const configuration = createElement(doc, "pre");
+  configuration.setAttribute("aria-label", "Experiment configuration");
+  configuration.textContent = JSON.stringify(report.configuration, null, 2);
+  section.append(configuration);
+  const evaluation = createElement(doc, "p");
+  evaluation.textContent = `Evaluation: ${report.evaluation.status} — ${report.evaluation.explanation}`;
+  section.append(evaluation);
+  const metrics = report.evaluation.metrics;
+  const metricsList = createElement(doc, "dl", "report-metrics");
+  for (const [label, value] of [
+    ["Requests", metrics.totalRequests],
+    ["Forwarded successfully", metrics.successfulForwardedRequests],
+    ["Upstream errors", metrics.upstreamErrors],
+    ["Injected failures", metrics.injectedBlackoutFailures],
+    ["Recovery successes", metrics.recoverySuccessCount],
+    ["Average latency", metrics.averageLatencyMs],
+    ["Recovery latency", metrics.recoveryLatencyMs],
+  ] as const) {
+    if (value === undefined) continue;
+    const row = createElement(doc, "div", "report-metric");
+    const term = createElement(doc, "dt");
+    term.textContent = label;
+    const detail = createElement(doc, "dd");
+    detail.textContent = String(value);
+    row.append(term, detail);
+    metricsList.append(row);
+  }
+  section.append(metricsList);
+  const evidenceTitle = createElement(doc, "h4");
+  evidenceTitle.textContent = `Evidence observations (${report.observations.length})`;
+  section.append(evidenceTitle);
+  if (report.observations.length > 0) {
+    const observations = createElement(doc, "ol", "evidence-observations");
+    for (const observation of report.observations) {
+      const item = createElement(doc, "li");
+      item.textContent = `${observation.phase} · ${new Date(observation.timestamp).toLocaleString()} · ${observation.method} · ${observation.outcome} · ${observation.latencyMs} ms${observation.injected ? " · injected" : ""}`;
+      observations.append(item);
+    }
+    section.append(observations);
+  } else {
+    const empty = createElement(doc, "p", "empty-copy");
+    empty.textContent =
+      "No observations were included in this verified report.";
+    section.append(empty);
+  }
+  for (const [label, entries] of [
+    ["Warnings", report.diagnostics.warnings],
+    ["Limitations", report.diagnostics.limitations],
+  ] as const) {
+    if (entries.length === 0) continue;
+    const diagnostics = createElement(doc, "section");
+    const heading = createElement(doc, "h4");
+    heading.textContent = label;
+    diagnostics.append(heading);
+    for (const entry of entries) {
+      const item = createElement(doc, "p", "muted");
+      item.textContent = entry;
+      diagnostics.append(item);
+    }
+    section.append(diagnostics);
+  }
+  const digest = createElement(doc, "code");
+  digest.textContent = `Evidence digest: ${report.evidenceDigest ?? "unavailable"}`;
+  section.append(digest);
+  return section;
 }
 
 function renderInspection(
@@ -631,7 +852,9 @@ export function mountStudioShell(
           )
         : route === "projects"
           ? renderProjects(doc, options.agent)
-          : renderPageState(doc, route, options.agent?.getState().connection),
+          : route === "experiments"
+            ? renderReports(doc, options.agent)
+            : renderPageState(doc, route, options.agent?.getState().connection),
     );
     setMobileMenu(false);
     if (moveFocus) title.focus();
@@ -658,6 +881,8 @@ export function mountStudioShell(
         );
         const code = shell.querySelector<HTMLInputElement>("[data-agent-code]");
         if (endpoint !== null && code !== null) {
+          const pairButton = agentAction.closest<HTMLButtonElement>("button");
+          if (pairButton !== null) pairButton.disabled = true;
           void options.agent.pair(endpoint.value, code.value);
         }
       } else if (action === "revoke") {
@@ -665,6 +890,27 @@ export function mountStudioShell(
       } else if (action === "inspect") {
         const projectId = agentAction.dataset.projectId;
         if (projectId !== undefined) void options.agent.inspect(projectId);
+      } else if (action === "reports") {
+        const projectId = agentAction.dataset.projectId;
+        if (projectId !== undefined) {
+          window.history.replaceState({}, "", hashForRoute("experiments"));
+          setRoute("experiments", true);
+          void options.agent.listReports(projectId);
+        }
+      } else if (action === "refresh-reports") {
+        void options.agent.refreshReports();
+      } else if (action === "open-report") {
+        const projectId = agentAction.dataset.projectId;
+        const executionId = agentAction.dataset.executionId;
+        if (projectId !== undefined && executionId !== undefined) {
+          window.history.replaceState(
+            {},
+            "",
+            hashForReport(projectId, executionId),
+          );
+          setRoute("experiments", true);
+          void options.agent.getReport(projectId, executionId);
+        }
       }
       return;
     }

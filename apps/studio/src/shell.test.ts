@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   agentStatusPresentation,
+  hashForReport,
   hashForRoute,
+  reportTargetFromHash,
   routeFromHash,
   type StudioRoute,
   studioNavigation,
@@ -33,6 +35,21 @@ describe("Studio navigation contract", () => {
     }
   });
 
+  it("encodes project and execution identifiers in report deep links", () => {
+    expect(hashForReport("root/project 1", "execution/2")).toBe(
+      "#/experiments/root%2Fproject%201/execution%2F2",
+    );
+    expect(routeFromHash(hashForReport("root/project 1", "execution/2"))).toBe(
+      "experiments",
+    );
+    expect(
+      reportTargetFromHash(
+        `${hashForReport("root/project 1", "execution/2")}?agent=http%3A%2F%2F127.0.0.1%3A8787&bootstrap=${"A".repeat(43)}`,
+      ),
+    ).toEqual({ projectId: "root/project 1", executionId: "execution/2" });
+    expect(reportTargetFromHash("#/experiments/%E0%A4%A/run")).toBeUndefined();
+  });
+
   it("keeps all current destinations available without enabling their operations", () => {
     expect(studioNavigation.map((item) => item.route)).toContain("projects");
     expect(studioNavigation.map((item) => item.route)).toContain(
@@ -46,6 +63,7 @@ describe("Local Agent status presentation", () => {
   it.each([
     ["disconnected", "Local Agent disconnected", "warning"],
     ["pairing", "Connecting to Local Agent", "info"],
+    ["expired", "Local Agent session expired", "warning"],
     ["connected", "Local Agent connected", "success"],
     ["error", "Local Agent connection error", "error"],
   ] as const)(

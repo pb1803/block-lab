@@ -1490,3 +1490,68 @@ button[hidden] {
     text-align: left;
   }
 }
+
+.report-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.report-phase {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.report-phase h4,
+.report-phase p {
+  margin: 0;
+}
+
+.report-phase h4 {
+  margin-bottom: var(--space-2);
+  text-transform: capitalize;
+}
+
+.report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
+.report-metric {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.report-metric dt {
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+}
+
+.report-metric dd {
+  margin: var(--space-1) 0 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.evidence-observations {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: 1.5rem;
+}
+
+.evidence-observations li {
+  padding-left: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .report-timeline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

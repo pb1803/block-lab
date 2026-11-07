@@ -1,16 +1,25 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRpcBlackoutEvidence, writeEvidence } from "@blocklab/evidence";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLocalAgent, pathIsWithinAuthorizedRoot } from "./server.js";
+import { runCli } from "../../cli/src/cli.js";
+import { createStudioAgentClient } from "../../studio/src/agent.js";
+import {
+  createLocalAgent,
+  pathIsWithinAuthorizedRoot,
+  projectIdForPath,
+} from "./server.js";
 
 const DEVELOPMENT_ORIGIN = "http://127.0.0.1:5178";
 const agents: Array<{ close: () => Promise<void> }> = [];
+const upstreams: Array<{ close: () => Promise<void> }> = [];
 const projectRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(agents.splice(0).map((agent) => agent.close()));
+  await Promise.all(upstreams.splice(0).map((server) => server.close()));
   for (const root of projectRoots.splice(0)) {
     if (root.startsWith(tmpdir()))
       rmSync(root, { force: true, recursive: true });
@@ -39,6 +48,52 @@ async function request(
   return { status: response.status, headers: response.headers, body };
 }
 
+async function listenRpcFixture(): Promise<{
+  readonly url: string;
+  readonly close: () => Promise<void>;
+}> {
+  const server = createServer((request, response) => {
+    const body: Buffer[] = [];
+    request.on("data", (chunk: Buffer | string) =>
+      body.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+    );
+    request.on("end", () => {
+      const payload = JSON.parse(Buffer.concat(body).toString("utf8")) as
+        | { readonly id?: string | number | null }
+        | readonly { readonly id?: string | number | null }[];
+      const reply = (entry: { readonly id?: string | number | null }) => ({
+        jsonrpc: "2.0",
+        id: entry.id ?? null,
+        result: "0x7a69",
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          Array.isArray(payload)
+            ? payload.map(reply)
+            : reply(payload as { readonly id?: string | number | null }),
+        ),
+      );
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string")
+    throw new Error("Local JSON-RPC fixture did not start.");
+  const handle = {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  };
+  upstreams.push(handle);
+  return handle;
+}
+
 function project(): string {
   const root = mkdtempSync(join(tmpdir(), "blocklab-agent-"));
   writeFileSync(
@@ -48,6 +103,39 @@ function project(): string {
   writeFileSync(join(root, "vite.config.ts"), "export default {}");
   projectRoots.push(root);
   return root;
+}
+
+function evidenceDirectory(): string {
+  const root = mkdtempSync(join(tmpdir(), "blocklab-evidence-"));
+  projectRoots.push(root);
+  return root;
+}
+
+async function createReport(directory: string, executionId = "execution-1") {
+  const startedAt = "2026-01-01T00:00:00.000Z";
+  const evidence = createRpcBlackoutEvidence(
+    {
+      executionId,
+      state: "completed",
+      startedAt,
+      finishedAt: "2026-01-01T00:00:01.000Z",
+    },
+    { startOffsetMs: 100, durationMs: 100, experimentDurationMs: 400 },
+    [
+      {
+        executionId,
+        scenarioId: "rpc-blackout",
+        timestamp: startedAt,
+        method: "eth_chainId",
+        outcome: "forwarded_success",
+        injected: false,
+        latencyMs: 1,
+        correlationId: `${executionId}-correlation`,
+      },
+    ],
+  );
+  await writeEvidence(join(directory, `${executionId}.json`), evidence);
+  return evidence;
 }
 
 async function pair(agent: Awaited<ReturnType<typeof createLocalAgent>>) {
@@ -134,6 +222,353 @@ describe("Local Runtime protocol boundary", () => {
       (inspected.body.inspection as Record<string, unknown>).detectedStack,
     ).toEqual(expect.arrayContaining(["Vite", "viem"]));
     expect(JSON.stringify(inspected.body)).not.toContain(projectRoots[0]);
+  });
+
+  it("lists and retrieves only verified reports for the authorized project", async () => {
+    const root = project();
+    const evidence = evidenceDirectory();
+    await createReport(evidence);
+    const agent = await createLocalAgent({
+      projectPaths: [root],
+      evidenceDirectories: [evidence],
+    });
+    agents.push(agent);
+    const paired = await pair(agent);
+    const token = accessToken(paired);
+    const projects = await request(`${agent.url}/v1/projects`, {
+      headers: auth(token),
+    });
+    const projectId = (
+      projects.body.projects as Array<Record<string, string>>
+    )[0]?.projectId;
+    expect(projectId).toBe(projectIdForPath(root));
+
+    const listed = await request(
+      `${agent.url}/v1/projects/${projectId}/reports`,
+      { headers: auth(token) },
+    );
+    const detail = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/execution-1`,
+      { headers: auth(token) },
+    );
+
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    expect((listed.body.reports as unknown[]).length).toBe(1);
+    expect(detail.status).toBe(200);
+    expect((detail.body as Record<string, unknown>).integrityStatus).toBe(
+      "verified",
+    );
+  });
+
+  it("runs a real CLI experiment and auto-connects Studio through scoped bootstrap", async () => {
+    const root = project();
+    const evidence = evidenceDirectory();
+    const rpc = await listenRpcFixture();
+    const cliOutput: string[] = [];
+    const cliError: string[] = [];
+    const result = await runCli(
+      [
+        "test",
+        "rpc-blackout",
+        "--upstream",
+        rpc.url,
+        "--evidence-dir",
+        evidence,
+        "--start-offset",
+        "100",
+        "--duration",
+        "200",
+        "--experiment-duration",
+        "400",
+        "--timeout",
+        "3000",
+      ],
+      {
+        cwd: root,
+        interactive: false,
+        stdout: (value) => cliOutput.push(value),
+        stderr: (value) => cliError.push(value),
+      },
+    );
+    expect(result, cliError.join("")).toBe(0);
+    expect(cliOutput.join("")).toContain("Evaluation:");
+    const evidenceFiles = readdirSync(evidence);
+    expect(evidenceFiles).toHaveLength(1);
+    const executionId = evidenceFiles[0]?.replace(/\.json$/, "");
+    expect(executionId).toBeDefined();
+    const projectId = projectIdForPath(root);
+    const agent = await createLocalAgent({
+      projectPaths: [root],
+      evidenceDirectories: [evidence],
+      bootstrapProjectId: projectId,
+    });
+    agents.push(agent);
+    expect(agent.bootstrapToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const studioFetch: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set("origin", DEVELOPMENT_ORIGIN);
+      return fetch(input, { ...init, headers });
+    };
+    const firstTab = createStudioAgentClient(studioFetch);
+    const secondTab = createStudioAgentClient(studioFetch);
+
+    const rejectedOrigin = await request(
+      `${agent.url}/v1/bootstrap`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          bootstrapToken: agent.bootstrapToken,
+          protocolVersions: ["1"],
+        }),
+      },
+      "https://attacker.example",
+    );
+    expect(rejectedOrigin.status).toBe(403);
+    await firstTab.bootstrap(agent.url, agent.bootstrapToken ?? "");
+    await firstTab.listReports(projectId);
+
+    expect(firstTab.getState().connection, firstTab.getState().error).toBe(
+      "connected",
+    );
+    expect(
+      firstTab.getState().projects.map((entry) => entry.projectId),
+    ).toEqual([projectId]);
+    expect(firstTab.getState().reports?.reports[0]?.executionId).toBe(
+      executionId,
+    );
+    await firstTab.getReport(projectId, executionId ?? "");
+    expect(firstTab.getState().selectedReport?.integrityStatus).toBe(
+      "verified",
+    );
+    expect(
+      firstTab.getState().selectedReport?.evaluation.metrics.totalRequests,
+    ).toBeGreaterThan(0);
+    expect(
+      firstTab.getState().selectedReport?.observations.length,
+    ).toBeGreaterThan(0);
+    expect(JSON.stringify(firstTab.getState())).not.toContain("accessToken");
+
+    await secondTab.bootstrap(agent.url, agent.bootstrapToken ?? "");
+    expect(secondTab.getState().connection).toBe("connected");
+    const invalidBootstrap = await request(`${agent.url}/v1/bootstrap`, {
+      method: "POST",
+      body: JSON.stringify({
+        bootstrapToken: "A".repeat(43),
+        protocolVersions: ["1"],
+      }),
+    });
+    expect(invalidBootstrap.status).toBe(401);
+    const invalidToken = await request(`${agent.url}/v1/projects`, {
+      headers: auth("A".repeat(43)),
+    });
+    expect(invalidToken.status).toBe(401);
+    await secondTab.revoke();
+    await firstTab.listReports(projectId);
+    expect(firstTab.getState().connection).toBe("connected");
+    expect(firstTab.getState().reports?.totalCount).toBe(1);
+
+    const refreshedTab = createStudioAgentClient(studioFetch);
+    await refreshedTab.bootstrap(agent.url, agent.bootstrapToken ?? "");
+    await refreshedTab.getReport(projectId, executionId ?? "");
+    expect(refreshedTab.getState().selectedReport?.executionId).toBe(
+      executionId,
+    );
+  });
+
+  it("limits bootstrap sessions to their explicitly selected project", async () => {
+    const first = project();
+    const second = project();
+    const projectId = projectIdForPath(first);
+    const agent = await createLocalAgent({
+      projectPaths: [first, second],
+      bootstrapProjectId: projectId,
+    });
+    agents.push(agent);
+    const bootstrapped = await request(`${agent.url}/v1/bootstrap`, {
+      method: "POST",
+      body: JSON.stringify({
+        bootstrapToken: agent.bootstrapToken,
+        protocolVersions: ["1"],
+      }),
+    });
+    const token = accessToken(bootstrapped);
+    const projects = await request(`${agent.url}/v1/projects`, {
+      headers: auth(token),
+    });
+    const otherProject = await request(
+      `${agent.url}/v1/projects/${projectIdForPath(second)}/reports`,
+      { headers: auth(token) },
+    );
+
+    expect(bootstrapped.status, JSON.stringify(bootstrapped.body)).toBe(200);
+    expect(
+      (projects.body.projects as Array<Record<string, string>>).map(
+        (item) => item.projectId,
+      ),
+    ).toEqual([projectId]);
+    expect(otherProject.status).toBe(403);
+    expect((otherProject.body.error as Record<string, string>).code).toBe(
+      "PROJECT_NOT_IN_SESSION",
+    );
+  });
+
+  it("rejects expired or exhausted bootstrap authorizations", async () => {
+    let currentTime = 1_000;
+    const root = project();
+    const agent = await createLocalAgent({
+      projectPaths: [root],
+      bootstrapProjectId: projectIdForPath(root),
+      now: () => currentTime,
+    });
+    agents.push(agent);
+    currentTime += 5 * 60_000;
+    const expired = await request(`${agent.url}/v1/bootstrap`, {
+      method: "POST",
+      body: JSON.stringify({
+        bootstrapToken: agent.bootstrapToken,
+        protocolVersions: ["1"],
+      }),
+    });
+
+    expect(expired.status, JSON.stringify(expired.body)).toBe(401);
+    expect((expired.body.error as Record<string, string>).code).toBe(
+      "BOOTSTRAP_EXPIRED",
+    );
+  });
+
+  it("rejects unauthenticated, unknown, malformed, and traversal report requests", async () => {
+    const root = project();
+    const evidence = evidenceDirectory();
+    await createReport(evidence);
+    const agent = await createLocalAgent({
+      projectPaths: [root],
+      evidenceDirectories: [evidence],
+    });
+    agents.push(agent);
+    const unauthenticated = await request(
+      `${agent.url}/v1/projects/local-project/reports`,
+    );
+    const paired = await pair(agent);
+    const token = accessToken(paired);
+    const projects = await request(`${agent.url}/v1/projects`, {
+      headers: auth(token),
+    });
+    const projectId = (
+      projects.body.projects as Array<Record<string, string>>
+    )[0]?.projectId;
+
+    const unknownProject = await request(
+      `${agent.url}/v1/projects/unknown-project/reports`,
+      { headers: auth(token) },
+    );
+    const malformed = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/../secret`,
+      { headers: auth(token) },
+    );
+    const traversal = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/..%2Fsecret`,
+      { headers: auth(token) },
+    );
+    const windowsPath = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/C:%5Csecret`,
+      { headers: auth(token) },
+    );
+    const uncPath = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/%5C%5Cserver%5Cshare`,
+      { headers: auth(token) },
+    );
+
+    expect(unauthenticated.status).toBe(401);
+    expect(unknownProject.status).toBe(404);
+    expect(malformed.status).toBe(404);
+    expect(traversal.status).toBe(400);
+    expect(windowsPath.status).toBe(400);
+    expect(uncPath.status).toBe(400);
+  });
+
+  it("does not expose missing-digest or mismatched evidence as reports", async () => {
+    const root = project();
+    const evidence = evidenceDirectory();
+    const valid = await createReport(evidence, "missing-digest");
+    writeFileSync(
+      join(evidence, "missing-digest.json"),
+      JSON.stringify({ ...valid, evidenceDigest: undefined }),
+    );
+    const mismatch = await createReport(evidence, "digest-mismatch");
+    writeFileSync(
+      join(evidence, "digest-mismatch.json"),
+      JSON.stringify({ ...mismatch, evidenceDigest: "f".repeat(64) }),
+    );
+    const agent = await createLocalAgent({
+      projectPaths: [root],
+      evidenceDirectories: [evidence],
+    });
+    agents.push(agent);
+    const paired = await pair(agent);
+    const token = accessToken(paired);
+    const projects = await request(`${agent.url}/v1/projects`, {
+      headers: auth(token),
+    });
+    const projectId = (
+      projects.body.projects as Array<Record<string, string>>
+    )[0]?.projectId;
+
+    const listed = await request(
+      `${agent.url}/v1/projects/${projectId}/reports`,
+      { headers: auth(token) },
+    );
+    const missing = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/missing-digest`,
+      { headers: auth(token) },
+    );
+    const mismatched = await request(
+      `${agent.url}/v1/projects/${projectId}/reports/digest-mismatch`,
+      { headers: auth(token) },
+    );
+
+    expect(listed.status).toBe(200);
+    expect((listed.body.reports as unknown[]).length).toBe(0);
+    expect(missing.status).toBe(422);
+    expect(mismatched.status).toBe(422);
+  });
+
+  it("keeps report evidence isolated between explicitly authorized projects", async () => {
+    const firstRoot = project();
+    const secondRoot = project();
+    const firstEvidence = evidenceDirectory();
+    const secondEvidence = evidenceDirectory();
+    await createReport(firstEvidence, "first-execution");
+    await createReport(secondEvidence, "second-execution");
+    const agent = await createLocalAgent({
+      projectPaths: [firstRoot, secondRoot],
+      evidenceDirectories: [firstEvidence, secondEvidence],
+    });
+    agents.push(agent);
+    const paired = await pair(agent);
+    const token = accessToken(paired);
+    const projects = await request(`${agent.url}/v1/projects`, {
+      headers: auth(token),
+    });
+    const projectIds = (
+      projects.body.projects as Array<Record<string, string>>
+    ).map((item) => item.projectId);
+
+    const firstReports = await request(
+      `${agent.url}/v1/projects/${projectIds[0]}/reports`,
+      { headers: auth(token) },
+    );
+    const crossProject = await request(
+      `${agent.url}/v1/projects/${projectIds[0]}/reports/second-execution`,
+      { headers: auth(token) },
+    );
+
+    expect(firstReports.status).toBe(200);
+    expect(
+      (firstReports.body.reports as Array<Record<string, unknown>>)[0]
+        ?.executionId,
+    ).toBe("first-execution");
+    expect(crossProject.status).toBe(404);
   });
 
   it("rejects unknown request fields with the protocol error envelope", async () => {
@@ -241,7 +676,7 @@ describe("Local Runtime protocol boundary", () => {
     );
   });
 
-  it("consumes pairing codes once and rotates them for a new single-tab session", async () => {
+  it("consumes pairing codes once while keeping independent tab sessions isolated", async () => {
     const agent = await createLocalAgent({ projectPaths: [project()] });
     agents.push(agent);
     const originalCode = agent.pairingCode;
@@ -259,6 +694,13 @@ describe("Local Runtime protocol boundary", () => {
     const oldSession = await request(`${agent.url}/v1/projects`, {
       headers: auth(firstToken),
     });
+    const revokeFirst = await request(`${agent.url}/v1/session`, {
+      method: "DELETE",
+      headers: auth(firstToken),
+    });
+    const revokedSession = await request(`${agent.url}/v1/projects`, {
+      headers: auth(firstToken),
+    });
     const newSession = await request(`${agent.url}/v1/projects`, {
       headers: auth(accessToken(second)),
     });
@@ -267,7 +709,9 @@ describe("Local Runtime protocol boundary", () => {
     expect(nextCode).not.toBe(originalCode);
     expect(reused.status).toBe(401);
     expect(second.status).toBe(200);
-    expect(oldSession.status).toBe(401);
+    expect(oldSession.status).toBe(200);
+    expect(revokeFirst.status).toBe(200);
+    expect(revokedSession.status).toBe(401);
     expect(newSession.status).toBe(200);
   });
 

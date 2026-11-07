@@ -5,26 +5,39 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import { isIP } from "node:net";
-import { basename, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import {
   LOCAL_RUNTIME_PROTOCOL_VERSION,
   LOCAL_RUNTIME_SERVICE,
   type PairRequest,
   ProtocolValidationError,
+  parseBootstrapRequest,
   parseEmptyRequest,
   parsePairRequest,
+  parseReportIdentifier,
+  REPORT_MAX_PAGE_SIZE,
+  type ReportListResponse,
   UnsupportedProtocolVersionError,
 } from "@blocklab/core";
+import {
+  type EvidenceRecord,
+  readEvidenceWithIntegrity,
+  toReportDetail,
+  toReportListResponse,
+} from "@blocklab/evidence";
 import { type InspectionSummary, inspectProject } from "@blocklab/inspector";
 
 const PAIRING_TTL_MS = 5 * 60_000;
 const SESSION_TTL_MS = 10 * 60_000;
+const BOOTSTRAP_TTL_MS = 5 * 60_000;
+const BOOTSTRAP_MAX_EXCHANGES = 8;
 const PAIRING_ATTEMPT_WINDOW_MS = 60_000;
 const MAX_PAIRING_ATTEMPTS = 5;
 const MAX_BODY_BYTES = 16_384;
@@ -40,7 +53,9 @@ const ALLOWED_HEADERS = new Set(["authorization", "content-type"]);
 
 export interface LocalAgentOptions {
   readonly projectPaths?: readonly string[];
+  readonly evidenceDirectories?: readonly string[];
   readonly allowedOrigins?: readonly string[];
+  readonly bootstrapProjectId?: string;
   readonly port?: number;
   readonly now?: () => number;
   readonly onPairingCode?: (code: string) => void;
@@ -49,6 +64,7 @@ export interface LocalAgentOptions {
 export interface LocalAgentHandle {
   readonly agentId: string;
   readonly pairingCode: string;
+  readonly bootstrapToken?: string;
   readonly port: number;
   readonly url: string;
   readonly revokeAll: () => void;
@@ -60,11 +76,18 @@ interface AuthorizedProject {
   readonly name: string;
   readonly rootIdentifier: string;
   readonly rootPath: string;
+  readonly evidenceDirectory: string | undefined;
 }
 
 interface Session {
-  readonly token: string;
   readonly expiresAt: number;
+  readonly projectIds: ReadonlySet<string>;
+}
+
+interface BootstrapTicket {
+  readonly expiresAt: number;
+  readonly projectId: string;
+  exchangesRemaining: number;
 }
 
 interface PairingAttemptBucket {
@@ -78,7 +101,8 @@ interface AgentState {
   pairingCodeDigest: Buffer;
   pairingExpiresAt: number;
   readonly projects: readonly AuthorizedProject[];
-  activeSession: Session | undefined;
+  readonly sessions: Map<string, Session>;
+  readonly bootstrapTickets: Map<string, BootstrapTicket>;
   readonly now: () => number;
   readonly allowedOrigins: ReadonlySet<string>;
   readonly pairingAttempts: Map<string, PairingAttemptBucket>;
@@ -396,18 +420,10 @@ function tokenFrom(request: IncomingMessage): string {
 
 function sessionFrom(request: IncomingMessage, state: AgentState): Session {
   const token = tokenFrom(request);
-  const session = state.activeSession;
-  if (
-    session === undefined ||
-    session.expiresAt <= state.now() ||
-    !timingSafeEqual(
-      createHash("sha256").update(token).digest(),
-      createHash("sha256").update(session.token).digest(),
-    )
-  ) {
-    if (session?.expiresAt !== undefined && session.expiresAt <= state.now()) {
-      state.activeSession = undefined;
-    }
+  const tokenDigest = createHash("sha256").update(token).digest("hex");
+  const session = state.sessions.get(tokenDigest);
+  if (session === undefined || session.expiresAt <= state.now()) {
+    if (session !== undefined) state.sessions.delete(tokenDigest);
     throw new AgentRequestError(
       401,
       "SESSION_EXPIRED",
@@ -418,15 +434,18 @@ function sessionFrom(request: IncomingMessage, state: AgentState): Session {
   return session;
 }
 
-function projectId(): string {
-  return `local-${randomBytes(8).toString("hex")}`;
+function canonicalProjectId(rootPath: string): string {
+  return `root-${createHash("sha256").update(rootPath).digest("hex").slice(0, 16)}`;
 }
 
 function rootIdentifier(rootPath: string): string {
   return `root-${createHash("sha256").update(rootPath).digest("hex").slice(0, 16)}`;
 }
 
-function authorizeProject(inputPath: string): AuthorizedProject {
+function authorizeProject(
+  inputPath: string,
+  configuredEvidenceDirectory: string | undefined,
+): AuthorizedProject {
   const resolved = resolve(inputPath);
   let realPath: string;
   try {
@@ -440,11 +459,16 @@ function authorizeProject(inputPath: string): AuthorizedProject {
       false,
     );
   }
+  const evidenceDirectory =
+    configuredEvidenceDirectory === undefined
+      ? undefined
+      : resolve(configuredEvidenceDirectory);
   return {
-    projectId: projectId(),
+    projectId: canonicalProjectId(realPath),
     name: basename(realPath),
     rootIdentifier: rootIdentifier(realPath),
     rootPath: realPath,
+    evidenceDirectory,
   };
 }
 
@@ -460,6 +484,131 @@ function projectResponse(project: AuthorizedProject): Record<string, string> {
     rootIdentifier: project.rootIdentifier,
     sourceType: "local",
     authorization: "explicit",
+  };
+}
+
+function decodePathIdentifier(
+  value: string | undefined,
+  field: string,
+): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value ?? "");
+  } catch {
+    throw new AgentRequestError(
+      400,
+      `INVALID_${field.toUpperCase()}`,
+      `${field} is invalid.`,
+      false,
+    );
+  }
+  try {
+    return parseReportIdentifier(decoded, field);
+  } catch {
+    throw new AgentRequestError(
+      400,
+      `INVALID_${field.toUpperCase()}`,
+      `${field} is invalid.`,
+      false,
+    );
+  }
+}
+
+function projectForRequest(
+  state: AgentState,
+  value: string | undefined,
+): AuthorizedProject {
+  const projectId = decodePathIdentifier(value, "projectId");
+  const project = state.projects.find((item) => item.projectId === projectId);
+  if (project === undefined) {
+    throw new AgentRequestError(
+      404,
+      "PROJECT_NOT_FOUND",
+      "Project is not authorized.",
+      false,
+    );
+  }
+  return project;
+}
+
+function projectForSession(
+  state: AgentState,
+  session: Session,
+  value: string | undefined,
+): AuthorizedProject {
+  const project = projectForRequest(state, value);
+  if (!session.projectIds.has(project.projectId)) {
+    throw new AgentRequestError(
+      403,
+      "PROJECT_NOT_IN_SESSION",
+      "Project is outside this Local Runtime session scope.",
+      false,
+    );
+  }
+  return project;
+}
+
+function evidenceDirectoryFor(project: AuthorizedProject): string {
+  if (project.evidenceDirectory === undefined) {
+    throw new AgentRequestError(
+      404,
+      "EVIDENCE_NOT_CONFIGURED",
+      "No evidence is configured for this project.",
+      false,
+    );
+  }
+  return project.evidenceDirectory;
+}
+
+async function verifiedEvidenceInDirectory(
+  project: AuthorizedProject,
+): Promise<readonly EvidenceRecord[]> {
+  const directory = evidenceDirectoryFor(project);
+  let names: readonly string[];
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return [];
+    }
+    throw new AgentRequestError(
+      500,
+      "EVIDENCE_UNAVAILABLE",
+      "Evidence could not be read.",
+    );
+  }
+  const records: EvidenceRecord[] = [];
+  for (const name of names.filter((item) => item.endsWith(".json")).sort()) {
+    const result = await readEvidenceWithIntegrity(join(directory, name));
+    if (result.integrity.status === "verified") {
+      const evidence = result.evidence;
+      if (evidence !== undefined) records.push(evidence);
+    }
+  }
+  return records;
+}
+
+function evidenceErrorStatus(status: string): {
+  readonly status: number;
+  readonly code: string;
+  readonly message: string;
+} {
+  if (status === "oversized") {
+    return {
+      status: 413,
+      code: "EVIDENCE_TOO_LARGE",
+      message: "Evidence exceeds the Local Runtime response limit.",
+    };
+  }
+  return {
+    status: 422,
+    code: "EVIDENCE_INVALID",
+    message: "Evidence integrity could not be verified.",
   };
 }
 
@@ -596,7 +745,42 @@ export async function createLocalAgent(
     throw new Error("At least one exact Local Runtime origin is required.");
   }
   const allowedOrigins = new Set(origins.map(validateOrigin));
-  const projects = (options.projectPaths ?? []).map(authorizeProject);
+  const projectPaths = options.projectPaths ?? [];
+  const evidenceDirectories = options.evidenceDirectories ?? [];
+  if (
+    evidenceDirectories.length !== 0 &&
+    evidenceDirectories.length !== projectPaths.length
+  ) {
+    throw new Error(
+      "Evidence directories must correspond one-to-one with project paths.",
+    );
+  }
+  const projects = projectPaths.map((path, index) =>
+    authorizeProject(path, evidenceDirectories[index]),
+  );
+  const bootstrapProjectId = options.bootstrapProjectId;
+  const bootstrapProject =
+    bootstrapProjectId === undefined
+      ? undefined
+      : projects.find((project) => project.projectId === bootstrapProjectId);
+  if (bootstrapProjectId !== undefined && bootstrapProject === undefined) {
+    throw new Error("Bootstrap project must be explicitly authorized.");
+  }
+  const bootstrapToken =
+    bootstrapProject === undefined
+      ? undefined
+      : randomBytes(32).toString("base64url");
+  const bootstrapTickets = new Map<string, BootstrapTicket>();
+  if (bootstrapProject !== undefined && bootstrapToken !== undefined) {
+    bootstrapTickets.set(
+      createHash("sha256").update(bootstrapToken).digest("hex"),
+      {
+        expiresAt: now() + BOOTSTRAP_TTL_MS,
+        projectId: bootstrapProject.projectId,
+        exchangesRemaining: BOOTSTRAP_MAX_EXCHANGES,
+      },
+    );
+  }
   const initialPairingCode = newPairingCode();
   const state: AgentState = {
     runtimeId: `runtime-${randomBytes(16).toString("hex")}`,
@@ -604,7 +788,8 @@ export async function createLocalAgent(
     pairingCodeDigest: digestPairingCode(initialPairingCode),
     pairingExpiresAt: now() + PAIRING_TTL_MS,
     projects,
-    activeSession: undefined,
+    sessions: new Map(),
+    bootstrapTickets,
     now,
     allowedOrigins,
     pairingAttempts: new Map(),
@@ -644,7 +829,10 @@ export async function createLocalAgent(
         );
       }
       const url = new URL(requestTarget, `http://${request.headers.host}`);
-      if (url.search !== "" || url.hash !== "") {
+      const reportListPath = /^\/v1\/projects\/[^/]+\/reports$/.test(
+        url.pathname,
+      );
+      if ((url.search !== "" && !reportListPath) || url.hash !== "") {
         throw new AgentRequestError(
           400,
           "INVALID_REQUEST_TARGET",
@@ -656,6 +844,7 @@ export async function createLocalAgent(
       if (
         request.method !== "POST" ||
         (url.pathname !== "/v1/pair" &&
+          url.pathname !== "/v1/bootstrap" &&
           !/^\/v1\/projects\/[^/]+\/inspect$/.test(url.pathname))
       ) {
         assertNoRequestBody(request);
@@ -684,6 +873,82 @@ export async function createLocalAgent(
             runtimeId: state.runtimeId,
             status: "ready",
             protocolVersions: [LOCAL_RUNTIME_PROTOCOL_VERSION],
+          },
+          requestId,
+        );
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/bootstrap") {
+        let bootstrapRequest: ReturnType<typeof parseBootstrapRequest>;
+        try {
+          bootstrapRequest = parseBootstrapRequest(await readJsonBody(request));
+        } catch (exception) {
+          if (exception instanceof UnsupportedProtocolVersionError) {
+            throw new AgentRequestError(
+              426,
+              "PROTOCOL_UNSUPPORTED",
+              "No supported Local Runtime protocol version was requested.",
+              false,
+            );
+          }
+          throw exception;
+        }
+        const digest = createHash("sha256")
+          .update(bootstrapRequest.bootstrapToken)
+          .digest("hex");
+        const ticket = state.bootstrapTickets.get(digest);
+        if (ticket === undefined || ticket.expiresAt <= state.now()) {
+          if (ticket !== undefined) state.bootstrapTickets.delete(digest);
+          throw new AgentRequestError(
+            401,
+            "BOOTSTRAP_EXPIRED",
+            "The Studio launch authorization expired. Start a new report handoff.",
+            false,
+          );
+        }
+        if (ticket.exchangesRemaining <= 0) {
+          state.bootstrapTickets.delete(digest);
+          throw new AgentRequestError(
+            401,
+            "BOOTSTRAP_EXHAUSTED",
+            "The Studio launch authorization has already been used.",
+            false,
+          );
+        }
+        const project = state.projects.find(
+          (item) => item.projectId === ticket.projectId,
+        );
+        if (project === undefined) {
+          state.bootstrapTickets.delete(digest);
+          throw new AgentRequestError(
+            403,
+            "PROJECT_NOT_FOUND",
+            "The launch project is no longer authorized.",
+            false,
+          );
+        }
+        ticket.exchangesRemaining -= 1;
+        const token = randomBytes(32).toString("base64url");
+        const expiresAt = state.now() + SESSION_TTL_MS;
+        state.sessions.set(createHash("sha256").update(token).digest("hex"), {
+          expiresAt,
+          projectIds: new Set([project.projectId]),
+        });
+        sendJson(
+          response,
+          200,
+          {
+            runtimeId: state.runtimeId,
+            protocolVersion: LOCAL_RUNTIME_PROTOCOL_VERSION,
+            accessToken: token,
+            expiresAt: new Date(expiresAt).toISOString(),
+            scopes: [
+              "projects:read",
+              "projects:inspect",
+              "reports:list",
+              "reports:read",
+            ],
           },
           requestId,
         );
@@ -721,9 +986,17 @@ export async function createLocalAgent(
         }
 
         bucket.attempts = 0;
+        for (const [digest, session] of state.sessions) {
+          if (session.expiresAt <= state.now()) state.sessions.delete(digest);
+        }
         const token = randomBytes(32).toString("base64url");
         const expiresAt = state.now() + SESSION_TTL_MS;
-        state.activeSession = { token, expiresAt };
+        state.sessions.set(createHash("sha256").update(token).digest("hex"), {
+          expiresAt,
+          projectIds: new Set(
+            state.projects.map((project) => project.projectId),
+          ),
+        });
         sendJson(
           response,
           200,
@@ -732,7 +1005,12 @@ export async function createLocalAgent(
             protocolVersion: LOCAL_RUNTIME_PROTOCOL_VERSION,
             accessToken: token,
             expiresAt: new Date(expiresAt).toISOString(),
-            scopes: ["projects:read", "projects:inspect"],
+            scopes: [
+              "projects:read",
+              "projects:inspect",
+              "reports:list",
+              "reports:read",
+            ],
           },
           requestId,
         );
@@ -742,17 +1020,162 @@ export async function createLocalAgent(
 
       if (request.method === "DELETE" && url.pathname === "/v1/session") {
         sessionFrom(request, state);
-        state.activeSession = undefined;
+        state.sessions.delete(
+          createHash("sha256").update(tokenFrom(request)).digest("hex"),
+        );
         sendJson(response, 200, { revoked: true }, requestId);
         return;
       }
 
-      sessionFrom(request, state);
+      const session = sessionFrom(request, state);
+      if (request.method === "GET" && reportListPath) {
+        const project = projectForSession(
+          state,
+          session,
+          url.pathname.match(/^\/v1\/projects\/([^/]+)\/reports$/)?.[1],
+        );
+        const unknownParameters = [...url.searchParams.keys()].filter(
+          (key) => key !== "cursor" && key !== "limit",
+        );
+        if (unknownParameters.length > 0) {
+          throw new AgentRequestError(
+            400,
+            "INVALID_REQUEST_TARGET",
+            "Report pagination parameters are invalid.",
+            false,
+          );
+        }
+        const cursorValues = url.searchParams.getAll("cursor");
+        const limitValues = url.searchParams.getAll("limit");
+        if (cursorValues.length > 1 || limitValues.length > 1) {
+          throw new AgentRequestError(
+            400,
+            "INVALID_REQUEST_TARGET",
+            "Report pagination parameters are invalid.",
+            false,
+          );
+        }
+        const cursor = cursorValues[0] ?? "0";
+        const limitText = limitValues[0] ?? String(REPORT_MAX_PAGE_SIZE);
+        if (!/^(?:0|[1-9]\d*)$/.test(cursor) || !/^\d+$/.test(limitText)) {
+          throw new AgentRequestError(
+            400,
+            "INVALID_REQUEST_TARGET",
+            "Report pagination parameters are invalid.",
+            false,
+          );
+        }
+        const offset = Number(cursor);
+        const limit = Number(limitText);
+        if (
+          !Number.isSafeInteger(offset) ||
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > REPORT_MAX_PAGE_SIZE
+        ) {
+          throw new AgentRequestError(
+            400,
+            "INVALID_REQUEST_TARGET",
+            "Report pagination parameters are invalid.",
+            false,
+          );
+        }
+        const records = await verifiedEvidenceInDirectory(project);
+        const page = records.slice(offset, offset + limit);
+        let body: ReportListResponse;
+        try {
+          body = toReportListResponse(
+            project.projectId,
+            page,
+            offset + page.length < records.length
+              ? String(offset + page.length)
+              : undefined,
+            records.length,
+          );
+        } catch {
+          throw new AgentRequestError(
+            413,
+            "REPORT_TOO_LARGE",
+            "The report response exceeds the Local Runtime limit.",
+            false,
+          );
+        }
+        sendJson(response, 200, body, requestId);
+        return;
+      }
+
+      const reportDetailMatch = url.pathname.match(
+        /^\/v1\/projects\/([^/]+)\/reports\/([^/]+)$/,
+      );
+      if (request.method === "GET" && reportDetailMatch !== null) {
+        const project = projectForSession(state, session, reportDetailMatch[1]);
+        const executionId = decodePathIdentifier(
+          reportDetailMatch[2],
+          "executionId",
+        );
+        const directory = evidenceDirectoryFor(project);
+        const candidate = resolve(directory, `${executionId}.json`);
+        if (!insideAuthorized(resolve(directory), candidate)) {
+          throw new AgentRequestError(
+            400,
+            "INVALID_EXECUTION_ID",
+            "executionId is invalid.",
+            false,
+          );
+        }
+        try {
+          if (!statSync(candidate).isFile()) throw new Error("not a file");
+        } catch {
+          throw new AgentRequestError(
+            404,
+            "REPORT_NOT_FOUND",
+            "Report was not found.",
+            false,
+          );
+        }
+        const result = await readEvidenceWithIntegrity(candidate);
+        if (result.integrity.status !== "verified") {
+          const failure = evidenceErrorStatus(result.integrity.status);
+          throw new AgentRequestError(
+            failure.status,
+            failure.code,
+            failure.message,
+            false,
+          );
+        }
+        const evidence = result.evidence;
+        if (evidence === undefined || evidence.executionId !== executionId) {
+          throw new AgentRequestError(
+            404,
+            "REPORT_NOT_FOUND",
+            "Report was not found.",
+            false,
+          );
+        }
+        let detail: ReturnType<typeof toReportDetail>;
+        try {
+          detail = toReportDetail(evidence);
+        } catch {
+          throw new AgentRequestError(
+            413,
+            "REPORT_TOO_LARGE",
+            "The report response exceeds the Local Runtime limit.",
+            false,
+          );
+        }
+        sendJson(response, 200, detail, requestId);
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/v1/projects") {
         sendJson(
           response,
           200,
-          { projects: state.projects.map(projectResponse) },
+          {
+            projects: state.projects
+              .filter((project) => session.projectIds.has(project.projectId))
+              .map(projectResponse),
+          },
           requestId,
         );
         return;
@@ -772,17 +1195,7 @@ export async function createLocalAgent(
             false,
           );
         }
-        const project = state.projects.find(
-          (item) => item.projectId === decodedProjectId,
-        );
-        if (project === undefined) {
-          throw new AgentRequestError(
-            404,
-            "PROJECT_NOT_FOUND",
-            "Project is not authorized.",
-            false,
-          );
-        }
+        const project = projectForSession(state, session, decodedProjectId);
         const inspected: InspectionSummary = inspectProject(project.rootPath);
         sendJson(
           response,
@@ -800,6 +1213,7 @@ export async function createLocalAgent(
       if (
         url.pathname === "/v1/health" ||
         url.pathname === "/v1/pair" ||
+        url.pathname === "/v1/bootstrap" ||
         url.pathname === "/v1/session" ||
         url.pathname === "/v1/projects"
       ) {
@@ -811,6 +1225,14 @@ export async function createLocalAgent(
         );
       }
       if (/^\/v1\/projects\/[^/]+\/inspect$/.test(url.pathname)) {
+        throw new AgentRequestError(
+          405,
+          "METHOD_NOT_ALLOWED",
+          "HTTP method is not allowed for this endpoint.",
+          false,
+        );
+      }
+      if (/^\/v1\/projects\/[^/]+\/reports(?:\/[^/]+)?$/.test(url.pathname)) {
         throw new AgentRequestError(
           405,
           "METHOD_NOT_ALLOWED",
@@ -880,10 +1302,12 @@ export async function createLocalAgent(
     get pairingCode() {
       return state.pairingCode;
     },
+    ...(bootstrapToken === undefined ? {} : { bootstrapToken }),
     port: address.port,
     url: `http://127.0.0.1:${address.port}`,
     revokeAll: () => {
-      state.activeSession = undefined;
+      state.sessions.clear();
+      state.bootstrapTickets.clear();
     },
     close: () =>
       new Promise((resolveClose, reject) =>
@@ -899,4 +1323,9 @@ export function pathIsWithinAuthorizedRoot(
   candidatePath: string,
 ): boolean {
   return insideAuthorized(resolve(rootPath), resolve(candidatePath));
+}
+
+export function projectIdForPath(inputPath: string): string {
+  const resolved = resolve(inputPath);
+  return canonicalProjectId(realpathSync(resolved));
 }

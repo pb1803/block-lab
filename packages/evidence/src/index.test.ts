@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  calculateEvidenceDigest,
   compareEvidence,
   createRpcBlackoutEvidence,
   createRpcConnectionFailureEvidence,
@@ -16,14 +17,20 @@ import {
   EvidenceValidationError,
   evaluateRpcBlackout,
   evaluateRpcLatency,
+  inspectEvidenceIntegrity,
   listEvidence,
   normalizeLatencyProxyEvidence,
   normalizeProxyEvidence,
   type RpcBlackoutEvidence,
   readEvidence,
+  readEvidenceWithIntegrity,
   replayConfiguration,
   toReplayConfiguration,
+  toReportDetail,
+  toReportListResponse,
+  toReportSummary,
   validateEvidence,
+  verifyEvidenceDigest,
   writeEvidence,
 } from "./index.js";
 
@@ -809,6 +816,180 @@ describe("local persistence", () => {
       await expect(
         readEvidence(join(directory, "missing.json")),
       ).rejects.toThrow(EvidenceValidationError);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("hardened evidence boundaries", () => {
+  it("redacts credential and path forms from report diagnostics", () => {
+    const evidence = completeEvidence([
+      record(0, "forwarded_success", "redaction-boundary"),
+    ]);
+    const report = toReportDetail({
+      ...evidence,
+      warnings: [
+        "Authorization: Bearer bearer-secret",
+        "Bearer standalone-secret",
+        "X-API-Key: api-secret",
+        "Authorization: basic-secret",
+        "AWS_SECRET_ACCESS_KEY=aws-secret",
+        '{"password":"json-secret"}',
+        "https://user:password@******example.test/path",
+        "C:\\Users\\person\\secret.txt",
+        "\\\\server\\share\\secret.txt",
+        "/home/person/.config/secret",
+      ],
+    });
+    const serialized = JSON.stringify(report);
+    for (const secret of [
+      "bearer-secret",
+      "standalone-secret",
+      "api-secret",
+      "basic-secret",
+      "aws-secret",
+      "json-secret",
+      "user:password",
+      "C:\\Users\\person",
+      "\\\\server\\share",
+      "/home/person",
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("rejects unsafe evidence identifiers", () => {
+    const evidence = completeEvidence([
+      record(0, "forwarded_success", "identifier-boundary"),
+    ]);
+    for (const identifier of [
+      "../secret",
+      "C:\\private\\evidence",
+      "/etc/passwd",
+      "\\\\server\\share\\evidence",
+      "x".repeat(129),
+    ]) {
+      expect(() =>
+        validateEvidence({ ...evidence, recordId: identifier }),
+      ).toThrow(EvidenceValidationError);
+    }
+    expect(() =>
+      toReportSummary({ ...evidence, executionId: "../secret" }),
+    ).toThrow(EvidenceValidationError);
+  });
+});
+
+describe("report protocol and evidence integrity", () => {
+  it("creates verified bounded reports from existing CLI evidence", () => {
+    const evidence = completeEvidence([
+      record(0, "forwarded_success", "report-baseline"),
+      record(100, "injected_blackout", "report-fault", true),
+      record(200, "forwarded_success", "report-recovery"),
+    ]);
+    expect(calculateEvidenceDigest(evidence)).toBe(evidence.evidenceDigest);
+    expect(verifyEvidenceDigest(evidence)).toBe(true);
+    expect(inspectEvidenceIntegrity(evidence).status).toBe("verified");
+    expect(toReportSummary(evidence)).toMatchObject({
+      executionId: "execution-1",
+      recordId: evidence.recordId,
+      integrityStatus: "verified",
+    });
+    expect(toReportDetail(evidence).observations).toHaveLength(3);
+    expect(toReportListResponse("project-1", [evidence]).totalCount).toBe(1);
+    expect(
+      toReportListResponse(
+        "project-1",
+        Array.from({ length: 64 }, () => evidence),
+      ).reports,
+    ).toHaveLength(64);
+    expect(() =>
+      toReportListResponse(
+        "project-1",
+        Array.from({ length: 65 }, () => evidence),
+      ),
+    ).toThrow(EvidenceValidationError);
+  });
+
+  it("reports missing and mismatched digests without treating them as verified", () => {
+    const evidence = completeEvidence([
+      record(0, "forwarded_success", "integrity-baseline"),
+    ]);
+    expect(
+      inspectEvidenceIntegrity({ ...evidence, evidenceDigest: undefined })
+        .status,
+    ).toBe("missing-digest");
+    expect(
+      inspectEvidenceIntegrity({
+        ...evidence,
+        evidenceDigest: "f".repeat(64),
+      }).status,
+    ).toBe("digest-mismatch");
+    expect(
+      toReportSummary({ ...evidence, evidenceDigest: "f".repeat(64) })
+        .integrityStatus,
+    ).toBe("digest-mismatch");
+    expect(() =>
+      toReportSummary({ ...evidence, evidenceDigest: "invalid" }),
+    ).toThrow(EvidenceValidationError);
+    for (const identifier of [
+      "../secret",
+      "C:\\private\\evidence",
+      "/etc/passwd",
+      "\\\\server\\share\\evidence",
+      "x".repeat(129),
+    ]) {
+      expect(() =>
+        validateEvidence({ ...evidence, recordId: identifier }),
+      ).toThrow(EvidenceValidationError);
+    }
+  });
+
+  it("distinguishes corrupt and unsupported evidence and redacts diagnostics", async () => {
+    const evidence = completeEvidence([
+      record(0, "forwarded_success", "redaction"),
+    ]);
+    const directory = await mkdtemp(join(tmpdir(), "blocklab-report-"));
+    const corruptPath = join(directory, "corrupt.json");
+    const oversizedPath = join(directory, "oversized.json");
+    try {
+      await writeFile(corruptPath, "{broken", "utf8");
+      expect(
+        (await readEvidenceWithIntegrity(corruptPath)).integrity.status,
+      ).toBe("malformed");
+      await writeFile(oversizedPath, "x".repeat(1_048_577), "utf8");
+      expect(
+        (await readEvidenceWithIntegrity(oversizedPath)).integrity.status,
+      ).toBe("oversized");
+      expect(
+        inspectEvidenceIntegrity({ ...evidence, schemaVersion: "9.0" }).status,
+      ).toBe("unsupported-version");
+      const report = toReportDetail({
+        ...evidence,
+        warnings: ["token=secret-value https://user:password@example.test/x"],
+      });
+      expect(JSON.stringify(report)).not.toContain("secret-value");
+      expect(JSON.stringify(report)).not.toContain("user:password");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not expose mismatched evidence through the integrity-aware reader", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "blocklab-integrity-"));
+    try {
+      const path = join(directory, "mismatch.json");
+      const evidence = completeEvidence([
+        record(0, "forwarded_success", "mismatch-reader"),
+      ]);
+      await writeFile(
+        path,
+        JSON.stringify({ ...evidence, evidenceDigest: "f".repeat(64) }),
+        "utf8",
+      );
+      const result = await readEvidenceWithIntegrity(path);
+      expect(result.integrity.status).toBe("digest-mismatch");
+      expect("evidence" in result).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

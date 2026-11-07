@@ -174,8 +174,9 @@ describe("Studio Overview model", () => {
 
     expect(model.experimentActivity.available).toBe(false);
     expect(model.experimentActivity.explanation).toContain(
-      "no experiment execution",
+      "does not execute experiments",
     );
+    expect(model.experimentActivity.explanation).toContain("verified reports");
     expect("runs" in model.experimentActivity).toBe(false);
   });
 

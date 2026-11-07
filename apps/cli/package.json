@@ -1,6 +1,6 @@
 {
   "name": "blocklab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first Ethereum dApp resilience testing CLI.",
   "license": "MIT",
   "private": true,
@@ -19,6 +19,7 @@
     "@blocklab/core": "workspace:*",
     "@blocklab/evidence": "workspace:*",
     "@blocklab/inspector": "workspace:*",
+    "@blocklab/local-agent": "workspace:*",
     "@blocklab/runner": "workspace:*",
     "@blocklab/scenarios": "workspace:*",
     "esbuild": "^0.25.0"

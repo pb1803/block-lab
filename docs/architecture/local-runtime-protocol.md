@@ -1,31 +1,29 @@
 # BLOCKLAB Local Runtime Protocol
 
 **Status:** D0.1 architecture decisions approved. D1 protocol/security
-foundation and D2 shared application/orchestration extraction are implemented;
-Local Runtime experiment, job, and evidence HTTP APIs remain unimplemented.
+foundation, D2 shared application/orchestration extraction, Phase 2A shared
+report/evidence contracts, Phase 2B read-only report APIs, and Phase 2C CLI
+Quick Run handoff and Studio report wiring are implemented. Automatic
+project-scoped bootstrap is available for CLI handoffs. Local Agent experiment
+execution and job HTTP APIs remain unimplemented; experiments run through the
+CLI only.
 **Date:** 2026-11-06
 **Scope:** Connect the statically hosted Studio to a developer-owned local
 runtime without moving execution or detailed evidence to Vercel.
 
 ## 1. Executive summary
 
-BLOCKLAB already has most of the local execution primitives, but it does not
-have a browser-to-runtime experiment protocol. Studio is a static Vite
-application. The current Local Agent is a separate, inspect-only HTTP process.
+Studio is a static Vite application. The Local Agent is a separate,
+inspect-only HTTP process.
 The CLI is the only supported experiment interface; it invokes the shared
 application/orchestration layer, which composes the runner, scenario
 definitions, and evidence package, persists evidence on the developer's
 machine, and supports listing, reporting, replay, and comparison through
 CLI-specific workflows.
 
-**Decision:** evolve `apps/local-agent` into the loopback Local Runtime HTTP
-host; do not create a second server or duplicate runtime implementation.
-Prefer exposing it through a future `blocklab runtime` CLI command. Extract a
-small reusable application/orchestration layer from the CLI's private
-experiment function so both CLI and runtime call the same validated scenario
-and evidence workflow. Keep the existing CLI experiment path independent and
-fully functional; it must not require the runtime process, HTTP, Studio, or a
-hosted account. Resolve packaging details during implementation.
+The Local Agent currently serves inspection and authenticated, read-only
+report APIs. Experiment execution remains in the CLI; no Studio or Local Agent
+HTTP route can start an experiment.
 
 The first release should be intentionally narrow: explicit project
 authorization; registration of local or remote endpoint configurations in the
@@ -42,16 +40,20 @@ Use versioned JSON HTTP APIs and authenticated polling for status and progress
 in the first release. Defer SSE and WebSockets. The exact HTTPS-hosted Studio
 to HTTP-loopback browser behavior is a mandatory release gate.
 
-This design is not authorization to implement the runtime. In particular,
-the current pairing code is 40 bits and reusable until expiry, browser
-responses are trusted by TypeScript casts rather than runtime schema
-validation, and evidence digests are not recomputed by the current validator.
-Those are design blockers to resolve before exposing experiment controls.
+The current implementation rotates the 128-bit pairing code after a successful
+pair, rate-limits failed attempts, and supports multiple independent
+ten-minute sessions. The Local Agent indexes sessions by a digest of each
+bearer token; Studio retains its token only in the client closure, never in
+browser storage or a URL. Shared protocol payloads are validated at runtime.
+Evidence structure validation and digest verification are separate
+operations: legacy evidence validation remains backward-compatible, while
+report projections explicitly expose an integrity status and never assume
+that JSON parsing proves authenticity.
 
 ## 2. Verified current architecture
 
-The following describes the checked-in source as inspected for D0, not the
-target design.
+The following describes the current implementation, not the future experiment
+API proposal in section 4.
 
 ### 2.1 Studio and deployment
 
@@ -62,20 +64,24 @@ target design.
 - `apps/studio/src/agent.ts` exports `createStudioAgentClient()`. Its state
   subscription publishes pairing, connected, inspection, and revoke changes.
   The token is held in a closure, not in Agent state or browser storage.
-  Responses are cast to TypeScript types; there is no runtime schema
-  validation or protocol compatibility gate. A client reload loses its
-  in-memory session.
-- The Projects workflow accepts a user-entered endpoint and pairing code.
-  `pair()` fetches `/health`, posts the code to `/pair`, and then loads
-  `/projects`. The client does not restrict the entered endpoint to loopback
-  before sending the pairing code.
+  Responses are validated with the shared runtime parsers. A client reload
+  loses its in-memory session.
+- The CLI report handoff opens Studio on the selected report with a short-lived
+  capability in the URL fragment. Studio exchanges that capability for an
+  in-memory session and loads the report without manual pairing. The Projects
+  workflow retains manual pairing for standalone agents and diagnostics.
+- `pair()` restricts manually entered endpoints to HTTP on literal
+  `127.0.0.1`, fetches `/v1/health`, posts a one-time code to `/v1/pair`, and
+  then loads `/v1/projects`.
 - `apps/studio/vite.config.ts` builds static assets to `dist-app`.
   `vercel.json` configures a static output and SPA fallback; it does not
   configure a runtime proxy, API server, or cloud execution service.
-- `docs/distribution-and-deployment.md` states that the current default Agent
-  Origin allowlist is for local development and does not include a deployed
-  Vercel Studio origin. Its description of the current deployment is static
-  Studio only.
+- The CLI defaults the Local Agent Origin allowlist to the exact deployed
+  Studio origin, `https://block-lab-eight.vercel.app`, when no explicit
+  origins are supplied. The standalone `blocklab-agent` entrypoint retains its
+  local-development defaults unless an exact `--allowed-origin` is provided.
+  The deployment remains static Studio only; it does not provide a cloud
+  runtime or evidence store.
 
 ### 2.2 Local Agent
 
@@ -83,28 +89,31 @@ target design.
   `pathIsWithinAuthorizedRoot()`. The HTTP server binds to `127.0.0.1`;
   `LocalAgentOptions` permits explicit project paths, allowed origins, an
   optional port, and a clock for tests. The default port is `0` (ephemeral).
-- Project directories are resolved and authorized at startup. `GET /projects`
-  lists only those authorized projects; `POST /projects/{id}/inspect` calls
-  `inspectProject()` and returns the inspection result. The Agent does not
-  scan arbitrary directories, run project scripts, execute experiments, or
-  manage evidence.
-- The current routes are `/health`, `/pair`, `/revoke`, `/projects`, and
-  `/projects/{id}/inspect`. `/health` is handled before the Origin requirement
-  and returns service, protocol version, Agent ID, readiness, and authorized
-  project count. Other routes require an exact configured `Origin`.
-- Pairing codes are generated from 5 random bytes (40 bits), expire after five
-  minutes, and are compared using `timingSafeEqual`. The code is not consumed
-  or rotated after successful pairing, so it can issue multiple sessions until
-  expiry. Failed attempts are not rate limited in the inspected server.
-- Session tokens contain 32 random bytes, expire after 30 minutes, and are
-  kept in process memory. `/revoke` removes the current token;
-  `revokeAll()` clears all sessions. Runtime restart naturally loses sessions.
-- Request bodies are limited to 16 KiB. No explicit response size limit is
-  present. The default allowed Origins are
+- Project directories are resolved and authorized at startup. The Agent lists
+  only authorized projects, supports read-only inspection, and reads only
+  digest-verified reports from each project's configured evidence directory.
+  It does not scan arbitrary directories, run project scripts, or execute
+  experiments.
+- Current versioned routes include `/v1/health`, `/v1/pair`,
+  `/v1/bootstrap`, `/v1/session`, `/v1/projects`,
+  `/v1/projects/{id}/inspect`, `/v1/projects/{id}/reports`, and
+  `/v1/projects/{id}/reports/{executionId}`. Protected requests require an
+  exact configured Origin, the expected Host, and a valid session token.
+- Pairing codes are generated from 16 random bytes (128 bits), expire after
+  five minutes, are compared using `timingSafeEqual`, and rotate after
+  successful pairing. Failed attempts are rate limited.
+- Pairing can create independent sessions. CLI report handoffs instead use a
+  project-scoped launch capability: it expires after five minutes, permits at
+  most eight exchanges, and is invalidated on Agent shutdown. Sessions contain
+  32 random bytes, expire after ten minutes, are kept in process memory, and
+  can be revoked independently. Runtime restart naturally loses all sessions.
+- Request bodies are limited to 16 KiB and responses to 1 MiB. The default
+  allowed Origins are
   `http://127.0.0.1:5178` and `http://localhost:5178`.
-- `apps/local-agent/src/index.ts` requires one explicit project directory,
-  starts the Agent, prints its ephemeral URL and pairing code, and closes on
-  SIGINT/SIGTERM. It does not expose a CLI option for the allowed-Origin list.
+- `apps/local-agent/src/index.ts` requires an explicit project directory,
+  starts the Agent, and closes on SIGINT/SIGTERM. The CLI starts or reuses the
+  Agent for report handoffs; standalone startup supports repeated
+  `--allowed-origin` options and explicit pairing.
 - `apps/local-agent/src/server.test.ts` covers pairing, project listing and
   inspection, rejection of a disallowed Origin, session revocation, and path
   containment. The inspected tests do not cover pairing expiry, brute-force
@@ -117,13 +126,10 @@ target design.
   currently contains six scenarios: `rpc-blackout`, `rpc-latency`,
   `rpc-intermittent-failure`, `rpc-rate-limit`,
   `rpc-connection-failure`, and `rpc-malformed-response`.
-- The private `executeExperiment()` function in the CLI composes the selected
-  scenario, starts `RpcProxy`, uses `startExecution()`, sends its own
-  controlled `eth_chainId` requests, converts the resulting proxy observations
-  into scenario-specific evidence, and calls `writeEvidence()`. It does not
-  start the inspected dApp or use its application workload. A future Studio
-  screen must not imply that the current runner tests arbitrary dApp user
-  journeys.
+- CLI Quick Run uses the shared application operation to compose the selected
+  scenario, runner, and evidence workflow. It does not start the inspected
+  dApp or use its application workload; Studio must not imply that the current
+  runner tests arbitrary dApp user journeys.
 - `packages/runner/src/index.ts` exports `RpcProxy`, `startExecution()`,
   `ExecutionContext`, lifecycle types, and cancellation/timeout handling.
   `startExecution()` returns an execution context and a result promise; the
@@ -148,25 +154,131 @@ target design.
   overwriting, then removes the temporary file.
 - `validateEvidence()` checks schema, scenario, schedule, timestamps,
   observation structure, and that `evidenceDigest` is 64 lowercase hex
-  characters. The inspected validator does **not** recompute the digest from
-  the record. A digest stored beside mutable evidence is also not a signature
-  and cannot prove authenticity against a local actor able to rewrite both.
+  characters. Phase 2A additionally exports explicit digest calculation and
+  integrity inspection; a digest stored beside mutable evidence is not a
+  signature and cannot prove authenticity against a local actor able to
+  rewrite both.
 - `apps/cli/src/cli.ts` stores evidence by default under the platform's
   application data directory (`%APPDATA%\\blocklab\\evidence` on Windows,
   `~/Library/Application Support/blocklab/evidence` on macOS, and
   `$XDG_DATA_HOME/blocklab/evidence` or `~/.local/share/blocklab/evidence` on
   Linux). `BLOCKLAB_EVIDENCE_DIR` and `--evidence-dir` override the location.
-  CLI commands include `runs list`, `runs show`, `report`, `replay`, and
-  `compare`. There is no persistent runtime command in the inspected CLI.
+  CLI commands include `runs list`, `runs show`, `report`, `replay`,
+  `compare`, and `studio <run-id>` for the Studio report handoff.
 - `packages/core/src/index.ts` defines `AgentHealth`, `AuthorizedProject`,
   `AgentInspectionResponse`, `ScenarioDefinition`, `Experiment`, and related
   domain types. It does not define the proposed HTTP API, idempotency, durable
   runtime job, or stream-event contracts.
 - `packages/application/src/index.ts` provides the shared `runExperiment`
-  orchestration operation for the CLI. It has no HTTP, Studio, Local Agent, or
-  CLI-output dependency; a future runtime caller may use it directly.
+  orchestration operation used by the CLI. It has no HTTP, Studio, Local
+  Agent, or CLI-output dependency. The Local Agent does not call it.
 
-### 2.4 Arkiv
+### 2.4 Phase 2A report and evidence contract
+
+The shared report protocol is version `1`, exported from
+`@blocklab/core` (`packages/core/src/local-runtime.ts`). It defines strict
+runtime parsers and these contracts:
+
+- `ReportSummary` contains the user-facing `executionId`, immutable
+  `recordId`, scenario identity, terminal state, evaluation, timestamps,
+  digest when present, and `integrityStatus`.
+- `ReportDetail` adds the validated scenario configuration, bounded
+  baseline/fault/recovery observations, and bounded warnings/limitations.
+- `ReportListResponse` contains the protocol version, authorized project
+  identifier, total count, a maximum 64-item page, and an optional cursor.
+- `ReportCapabilities` advertises supported read-only operations, maximum page
+  size, and maximum report response bytes.
+
+`executionId` is the user-facing report identifier. `recordId` identifies the
+immutable evidence record. Both are restricted to safe identifier characters;
+filesystem paths are not part of the protocol and clients cannot submit them.
+The Local Agent resolves these identifiers only within its configured
+evidence directory.
+
+Report integrity is one of `verified`, `missing-digest`, `digest-mismatch`,
+`unsupported-version`, `malformed`, or `oversized`. The evidence package
+provides `calculateEvidenceDigest`, `verifyEvidenceDigest`,
+`inspectEvidenceIntegrity`, `readEvidenceWithIntegrity`, `toReportSummary`, and
+`toReportDetail`. Existing `readEvidence`, CLI report commands, and evidence
+files remain compatible; digest verification is explicit and is not inferred
+from successful JSON parsing.
+
+Shared bounds are a maximum 64 report summaries per page, 512 observations per
+detail response, and 1 MiB for evidence/report payloads. Individual objects
+are limited to 128 keys, a complete payload to 8,192 object keys, nesting to
+12 levels, strings to 4,096 characters, and arrays to 512 items. Evidence
+diagnostic/warning/limitation arrays are limited to 64 entries; observation
+methods are limited to 256 characters and correlation identifiers to 128
+characters. Strict keys, timestamp/identifier validation, exact
+scenario-version and scenario-specific configuration validation, and bounded
+diagnostic strings reject malformed or unexpected data. Report diagnostics
+redact URL credentials, authorization/API-key/bearer headers, secret-shaped
+values, environment secret assignments, and Windows, UNC, Unix, and home
+filesystem paths. The contract contains no session tokens, environment
+variables, absolute paths, or arbitrary RPC request data.
+
+`readEvidenceWithIntegrity()` is a discriminated result: only a result with
+`integrity.status === "verified"` contains an `evidence` record. Missing,
+mismatched, malformed, unsupported-version, and oversized evidence results
+contain an integrity status and error but no evidence record. Successful JSON
+parsing alone is never sufficient for verification. The digest canonical field
+set and serialization order remain unchanged for compatibility; `recordId`,
+warnings, and limitations remain excluded from the digest.
+
+Phase 2A added schemas and evidence projections only. Phase 2B added the
+authenticated Local Agent report routes described below, and Phase 2C wires
+the existing CLI and Studio report workflow to those routes. Cloud storage and
+experiment execution through the Local Agent remain unimplemented.
+
+### 2.6 Phase 2B Local Agent report access
+
+The Local Agent exposes the following authenticated, read-only report routes:
+
+- `GET /v1/projects/:projectId/reports`
+- `GET /v1/projects/:projectId/reports/:executionId`
+
+The first route supports bounded `limit` (1-64) and numeric `cursor`
+parameters and returns `ReportListResponse`. The second route returns
+`ReportDetail`. Both routes require a valid session scoped to the explicitly
+authorized project. Responses are `Cache-Control: no-store`; session tokens
+remain in the Authorization header and are never accepted in URLs.
+
+Evidence-directory ownership is established by the trusted Local Agent startup
+configuration: each project path has a corresponding configured evidence
+directory. Browser requests cannot submit or select evidence paths. The agent
+enumerates only that configured directory for listings and resolves detail
+requests from a validated execution identifier. Only digest-verified evidence
+is projected; missing, mismatched, malformed, unsupported, or oversized
+evidence is not returned as a report. A project with no configured evidence
+directory has no report access.
+
+### 2.7 Automatic CLI report handoff
+
+After a CLI experiment, the CLI starts or reuses the loopback Local Agent,
+configures the canonical project and its evidence directory, and creates a
+random project-scoped bootstrap capability. The handoff opens the hosted
+Studio on the selected report and carries the capability in the URL fragment.
+Studio reads the capability from the fragment, exchanges it through
+`POST /v1/bootstrap`, and keeps the returned bearer session only in memory.
+The short-lived capability remains in the fragment so bounded automatic
+recovery can exchange it again after a reload or session loss. The ticket
+expires after five minutes, permits at
+most eight exchanges to support refresh/recovery, and is invalidated when the
+Agent shuts down. The resulting session expires after ten minutes and is
+revocable; it cannot access another project.
+
+The fragment is not sent in HTTP requests or referrers. It is temporarily
+present in the browser's launch URL/history, so it is a short-lived capability
+rather than a permanent secret; do not copy it into logs or support requests.
+Session tokens are never put in URLs or browser storage. The Agent
+independently checks loopback binding, exact Origin,
+Host, session validity, project scope, and evidence digest. If the hosted
+Studio cannot reach loopback, the UI reports the connection failure and
+provides a manual pairing/diagnostics fallback; it does not pretend to be
+connected. Browser local-network permission prompts are controlled by the
+browser and cannot be bypassed by BLOCKLAB.
+
+### 2.5 Arkiv
 
 `apps/studio/src/arkiv/controller.ts` and `state.ts` provide the current
 wallet-mediated history, record, publish, and ownership state machines.
@@ -260,10 +372,13 @@ same approved endpoint. The Local Runtime HTTP server itself always binds to
 | CLI | Remain a standalone direct interface using the same domain/application functions. | Require a running HTTP runtime for existing commands. |
 | Arkiv | Continue its separate wallet-mediated compact metadata workflow. | Become the source of truth for full local evidence or runtime job state. |
 
-## 4. API protocol and endpoint contracts
+## 4. Future experiment API proposal
 
-The following is a proposed v1 contract, not an existing API. All paths are
-under `/v1`. JSON requests and responses use strict runtime schemas with
+This section is a future design proposal, not a description of currently
+implemented routes. Current Local Agent pairing, bootstrap, session, project,
+inspection, and report route behavior is documented in sections 2.2, 2.6, and
+2.7. The experiment/job routes below are not implemented. Any future paths
+would be under `/v1`; JSON requests and responses should use strict runtime schemas with
 unknown keys rejected. Successful responses include `protocolVersion` where
 useful; errors use a single envelope:
 

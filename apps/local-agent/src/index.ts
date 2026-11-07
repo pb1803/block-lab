@@ -48,4 +48,8 @@ if (invalidArguments || projectPaths.length !== 1) {
   process.once("SIGTERM", shutdown);
 }
 
-export { createLocalAgent, pathIsWithinAuthorizedRoot } from "./server.js";
+export {
+  createLocalAgent,
+  pathIsWithinAuthorizedRoot,
+  projectIdForPath,
+} from "./server.js";
